@@ -5,23 +5,33 @@ use anyhow::{Context, Result};
 use tokio::sync::{RwLock, mpsc, watch};
 use tracing::{error, info, warn};
 
+use rtime_clock::unix::UnixClock;
+use rtime_core::clock::Clock;
 use rtime_core::config::RtimeConfig;
 use rtime_core::selection::select_sources;
+use rtime_core::servo::ServoConfig;
 use rtime_core::source::{SourceId, SourceMeasurement};
+use rtime_core::timestamp::NtpDuration;
 use rtime_ntp::server::ServerState;
 
+use crate::clock_discipline;
 use crate::ntp_client;
 use crate::ntp_server;
 
 /// Channel buffer size for source measurements.
 const MEASUREMENT_CHANNEL_SIZE: usize = 64;
 
+/// Default poll interval in seconds (matches NTP client normal poll).
+const DEFAULT_POLL_INTERVAL_SECS: f64 = 64.0;
+
 /// The daemon orchestrator. Spawns and manages NTP client tasks, the NTP server,
-/// and the source selection loop.
+/// the source selection loop, and the clock discipline task.
 pub struct Daemon {
     config: Arc<RtimeConfig>,
     measurement_tx: Option<mpsc::Sender<SourceMeasurement>>,
     measurement_rx: mpsc::Receiver<SourceMeasurement>,
+    offset_tx: watch::Sender<Option<NtpDuration>>,
+    offset_rx: watch::Receiver<Option<NtpDuration>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
 }
@@ -30,11 +40,14 @@ impl Daemon {
     pub fn new(config: RtimeConfig) -> Self {
         let (measurement_tx, measurement_rx) = mpsc::channel(MEASUREMENT_CHANNEL_SIZE);
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (offset_tx, offset_rx) = watch::channel(None);
 
         Self {
             config: Arc::new(config),
             measurement_tx: Some(measurement_tx),
             measurement_rx,
+            offset_tx,
+            offset_rx,
             shutdown_tx,
             shutdown_rx,
         }
@@ -100,6 +113,43 @@ impl Daemon {
             None
         };
 
+        // Spawn clock discipline task if enabled.
+        let discipline_handle = if self.config.clock.discipline {
+            let clock: Arc<dyn Clock> = Arc::new(UnixClock::new());
+            let offset_rx = self.offset_rx.clone();
+            let shutdown = self.shutdown_rx.clone();
+
+            let servo_config = ServoConfig {
+                step_threshold_ns: self.config.clock.step_threshold_ms * 1_000_000.0,
+                ..Default::default()
+            };
+
+            info!(
+                "Clock discipline enabled (adjustable={}, step_threshold={:.0}ms)",
+                clock.is_adjustable(),
+                self.config.clock.step_threshold_ms,
+            );
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = clock_discipline::run_clock_discipline(
+                    clock,
+                    offset_rx,
+                    DEFAULT_POLL_INTERVAL_SECS,
+                    servo_config,
+                    shutdown,
+                )
+                .await
+                {
+                    error!("Clock discipline task exited with error: {}", e);
+                }
+            });
+
+            Some(handle)
+        } else {
+            info!("Clock discipline disabled (--no-discipline)");
+            None
+        };
+
         // Drop our sender so the selection loop can detect
         // when all client tasks have exited (channel closes).
         drop(self.measurement_tx.take());
@@ -120,12 +170,18 @@ impl Daemon {
             let _ = handle.await;
         }
 
+        // Wait for discipline task to finish.
+        if let Some(handle) = discipline_handle {
+            let _ = handle.await;
+        }
+
         info!("rTime daemon stopped");
         Ok(())
     }
 
     /// The selection loop receives measurements from NTP client tasks,
     /// runs Marzullo's algorithm / source selection, and updates the server state.
+    /// When a system offset is computed, it is sent to the clock discipline task.
     async fn run_selection_loop(&mut self, server_state: Arc<RwLock<ServerState>>) {
         // Collect recent measurements per source. We keep the latest measurement
         // from each source for the selection algorithm.
@@ -183,12 +239,14 @@ impl Daemon {
                                     state.reference_id = *reference_id;
                                 }
 
-                                // Clock discipline would happen here in Phase 3.
                                 info!(
                                     "Server state updated: stratum={} ref_id=0x{:08x} peer={}",
                                     state.stratum, state.reference_id, peer_id,
                                 );
                             }
+
+                            // Send system offset to clock discipline task.
+                            let _ = self.offset_tx.send(Some(result.system_offset));
                         } else {
                             warn!(
                                 "No system peer selected ({} measurements, {} truechimers)",

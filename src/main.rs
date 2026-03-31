@@ -11,6 +11,7 @@ use rtime_core::timestamp::NtpTimestamp;
 use rtime_ntp::client;
 use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
 
+mod clock_discipline;
 mod daemon;
 mod ntp_client;
 mod ntp_server;

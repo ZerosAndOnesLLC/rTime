@@ -333,7 +333,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "rtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-clock"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "rtime-core",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -366,14 +366,14 @@ dependencies = [
 
 [[package]]
 name = "rtime-metrics"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rtime-core",
 ]
 
 [[package]]
 name = "rtime-net"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "rtime-core",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-ntp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rand",
  "rtime-core",
@@ -392,7 +392,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-nts"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rtime-core",
  "thiserror",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-ptp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rtime-core",
  "thiserror",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-refclock"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rtime-core",
  "thiserror",
