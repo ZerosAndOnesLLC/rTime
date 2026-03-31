@@ -230,6 +230,11 @@ impl NtpDuration {
     pub fn raw(self) -> i128 {
         self.0
     }
+
+    /// Create from raw internal value (inverse of `raw()`).
+    pub fn from_raw(raw: i128) -> Self {
+        Self(raw)
+    }
 }
 
 impl Add for NtpDuration {

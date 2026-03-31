@@ -1,13 +1,19 @@
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use tracing::{error, info};
 
+use rtime_core::config::RtimeConfig;
 use rtime_core::timestamp::NtpTimestamp;
 use rtime_ntp::client;
 use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
+
+mod daemon;
+mod ntp_client;
+mod ntp_server;
 
 #[derive(Parser)]
 #[command(name = "rtime", version, about = "rTime - NTP/PTP time synchronization service")]
@@ -85,6 +91,25 @@ fn query_ntp_server(addr: SocketAddr) -> Result<client::NtpResult> {
     Ok(result)
 }
 
+/// Load the rTime configuration from a TOML file.
+/// Returns a default config if the file does not exist.
+fn load_config(path: &str) -> Result<RtimeConfig> {
+    let path = Path::new(path);
+    if !path.exists() {
+        info!("Config file not found at {}, using defaults", path.display());
+        return Ok(RtimeConfig::default());
+    }
+
+    let contents = std::fs::read_to_string(path)
+        .context(format!("failed to read config file: {}", path.display()))?;
+
+    let config: RtimeConfig = toml::from_str(&contents)
+        .context(format!("failed to parse config file: {}", path.display()))?;
+
+    info!("Loaded config from {}", path.display());
+    Ok(config)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -97,71 +122,101 @@ async fn main() -> Result<()> {
         .init();
 
     if let Some(server) = &cli.server {
-        let addr = resolve_server(server)?;
-        info!("Querying NTP server: {} ({})", server, addr);
-
-        let mut offsets = Vec::new();
-        let mut delays = Vec::new();
-
-        for i in 0..cli.count {
-            match query_ntp_server(addr) {
-                Ok(result) => {
-                    let offset_ms = result.offset.to_millis_f64();
-                    let delay_ms = result.delay.to_millis_f64();
-
-                    info!(
-                        "[{}/{}] offset: {:+.3}ms, delay: {:.3}ms, stratum: {}",
-                        i + 1,
-                        cli.count,
-                        offset_ms,
-                        delay_ms,
-                        result.stratum,
-                    );
-
-                    offsets.push(offset_ms);
-                    delays.push(delay_ms);
-                }
-                Err(e) => {
-                    error!("[{}/{}] query failed: {}", i + 1, cli.count, e);
-                }
-            }
-
-            if i + 1 < cli.count {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        }
-
-        if !offsets.is_empty() {
-            let avg_offset: f64 = offsets.iter().sum::<f64>() / offsets.len() as f64;
-            let avg_delay: f64 = delays.iter().sum::<f64>() / delays.len() as f64;
-            let min_delay: f64 = delays.iter().cloned().fold(f64::INFINITY, f64::min);
-
-            // Compute jitter (RMS of successive differences)
-            let jitter = if offsets.len() > 1 {
-                let sum_sq: f64 = offsets
-                    .windows(2)
-                    .map(|w| (w[1] - w[0]).powi(2))
-                    .sum();
-                (sum_sq / (offsets.len() - 1) as f64).sqrt()
-            } else {
-                0.0
-            };
-
-            println!();
-            println!("--- {} NTP statistics ---", server);
-            println!(
-                "{} queries, avg offset: {:+.3}ms, avg delay: {:.3}ms, min delay: {:.3}ms, jitter: {:.3}ms",
-                offsets.len(),
-                avg_offset,
-                avg_delay,
-                min_delay,
-                jitter,
-            );
-        }
+        // Single-query mode: query a specific NTP server.
+        run_single_query(server, cli.count).await
     } else {
+        // Daemon mode: load config and run the full daemon.
+        let mut config = load_config(&cli.config)?;
+
+        if cli.no_discipline {
+            config.clock.discipline = false;
+        }
+
         info!("rTime v{}", env!("CARGO_PKG_VERSION"));
-        info!("No server specified. Use --server <host> to query an NTP server.");
-        info!("Full daemon mode coming in Phase 2.");
+        info!(
+            "Config: {} NTP sources, server={}, listen={}",
+            config.ntp.sources.len(),
+            if config.ntp.enabled { "enabled" } else { "disabled" },
+            config.ntp.listen,
+        );
+
+        let mut daemon = daemon::Daemon::new(config);
+
+        // Set up graceful shutdown on Ctrl+C.
+        tokio::select! {
+            result = daemon.run() => {
+                result
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C, shutting down");
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Run the single-query mode against a specific NTP server.
+async fn run_single_query(server: &str, count: u32) -> Result<()> {
+    let addr = resolve_server(server)?;
+    info!("Querying NTP server: {} ({})", server, addr);
+
+    let mut offsets = Vec::new();
+    let mut delays = Vec::new();
+
+    for i in 0..count {
+        match query_ntp_server(addr) {
+            Ok(result) => {
+                let offset_ms = result.offset.to_millis_f64();
+                let delay_ms = result.delay.to_millis_f64();
+
+                info!(
+                    "[{}/{}] offset: {:+.3}ms, delay: {:.3}ms, stratum: {}",
+                    i + 1,
+                    count,
+                    offset_ms,
+                    delay_ms,
+                    result.stratum,
+                );
+
+                offsets.push(offset_ms);
+                delays.push(delay_ms);
+            }
+            Err(e) => {
+                error!("[{}/{}] query failed: {}", i + 1, count, e);
+            }
+        }
+
+        if i + 1 < count {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    if !offsets.is_empty() {
+        let avg_offset: f64 = offsets.iter().sum::<f64>() / offsets.len() as f64;
+        let avg_delay: f64 = delays.iter().sum::<f64>() / delays.len() as f64;
+        let min_delay: f64 = delays.iter().cloned().fold(f64::INFINITY, f64::min);
+
+        // Compute jitter (RMS of successive differences)
+        let jitter = if offsets.len() > 1 {
+            let sum_sq: f64 = offsets
+                .windows(2)
+                .map(|w| (w[1] - w[0]).powi(2))
+                .sum();
+            (sum_sq / (offsets.len() - 1) as f64).sqrt()
+        } else {
+            0.0
+        };
+
+        println!();
+        println!("--- {} NTP statistics ---", server);
+        println!(
+            "{} queries, avg offset: {:+.3}ms, avg delay: {:.3}ms, min delay: {:.3}ms, jitter: {:.3}ms",
+            offsets.len(),
+            avg_offset,
+            avg_delay,
+            min_delay,
+            jitter,
+        );
     }
 
     Ok(())
