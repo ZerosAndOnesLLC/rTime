@@ -1,0 +1,93 @@
+[workspace]
+members = [
+    "crates/rtime-core",
+    "crates/rtime-ntp",
+    "crates/rtime-nts",
+    "crates/rtime-ptp",
+    "crates/rtime-clock",
+    "crates/rtime-net",
+    "crates/rtime-refclock",
+    "crates/rtime-metrics",
+    ".",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Zeros And Ones LLC"]
+repository = "https://github.com/ZerosAndOnesLLC/rTime"
+
+[workspace.dependencies]
+# Internal crates
+rtime-core = { path = "crates/rtime-core" }
+rtime-ntp = { path = "crates/rtime-ntp" }
+rtime-nts = { path = "crates/rtime-nts" }
+rtime-ptp = { path = "crates/rtime-ptp" }
+rtime-clock = { path = "crates/rtime-clock" }
+rtime-net = { path = "crates/rtime-net" }
+rtime-refclock = { path = "crates/rtime-refclock" }
+rtime-metrics = { path = "crates/rtime-metrics" }
+
+# Async
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "signal", "macros"] }
+
+# Serialization / Config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# System
+libc = "0.2"
+nix = { version = "0.29", features = ["time", "net", "ioctl"] }
+
+# Crypto / TLS
+rustls = "0.23"
+rustls-pemfile = "2"
+aes-siv = "0.7"
+rand = "0.9"
+sha2 = "0.10"
+
+# HTTP / Metrics
+axum = "0.8"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+[package]
+name = "rtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rtime-core = { workspace = true }
+rtime-ntp = { workspace = true }
+rtime-clock = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = ["ntp", "ptp", "nts", "clock-discipline", "metrics"]
+ntp = []
+ptp = []
+nts = []
+clock-discipline = []
+metrics = []
+gps = []
+pps = []
+hardware-timestamping = []

@@ -1,0 +1,11 @@
+[package]
+name = "rtime-nts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Network Time Security (NTS) for rTime"
+
+[dependencies]
+rtime-core = { workspace = true }
+thiserror = { workspace = true }

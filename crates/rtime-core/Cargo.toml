@@ -1,0 +1,11 @@
+[package]
+name = "rtime-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core types, traits, and algorithms for rTime"
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }

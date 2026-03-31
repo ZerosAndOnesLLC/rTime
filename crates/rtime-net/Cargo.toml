@@ -1,0 +1,13 @@
+[package]
+name = "rtime-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Network I/O with timestamping for rTime"
+
+[dependencies]
+rtime-core = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+libc = { workspace = true }
