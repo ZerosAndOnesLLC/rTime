@@ -1,14 +1,46 @@
 use std::net::SocketAddr;
+use std::os::unix::io::AsRawFd;
 
 use rtime_core::timestamp::NtpTimestamp;
 use tokio::net::UdpSocket;
 
+// ---------------------------------------------------------------------------
+// SO_TIMESTAMPING flag constants (linux/net_tstamp.h)
+// Defined here because libc may not expose them.
+// ---------------------------------------------------------------------------
+const SOF_TIMESTAMPING_TX_HARDWARE: u32 = 1 << 0;
+const SOF_TIMESTAMPING_TX_SOFTWARE: u32 = 1 << 1;
+const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
+const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
+const SOF_TIMESTAMPING_SOFTWARE: u32 = 1 << 4;
+const SOF_TIMESTAMPING_RAW_HARDWARE: u32 = 1 << 6;
+
+/// `SO_TIMESTAMPING` socket option number (Linux).
+const SO_TIMESTAMPING: libc::c_int = 37;
+
+/// `SO_TIMESTAMPNS` socket option number (Linux).
+const SO_TIMESTAMPNS: libc::c_int = 35;
+
+/// Timestamping mode currently active on the socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimestampMode {
+    /// Timestamps are taken in userspace via `NtpTimestamp::now()`.
+    Userspace,
+    /// Kernel software timestamps via `SO_TIMESTAMPNS` or `SO_TIMESTAMPING`.
+    Software,
+    /// Hardware timestamps via `SO_TIMESTAMPING` with `RAW_HARDWARE`.
+    Hardware,
+}
+
 /// A UDP socket wrapper that captures timestamps on send/receive.
 ///
-/// Currently uses software timestamping via `NtpTimestamp::now()`.
-/// Hardware timestamping (SO_TIMESTAMPING) will be added in Phase 7.
+/// Supports three timestamping modes (best to worst accuracy):
+/// 1. Hardware (SO_TIMESTAMPING with RAW_HARDWARE) -- requires NIC support
+/// 2. Kernel software (SO_TIMESTAMPING or SO_TIMESTAMPNS)
+/// 3. Userspace (NtpTimestamp::now() immediately after syscall)
 pub struct TimestampedSocket {
     inner: UdpSocket,
+    mode: TimestampMode,
 }
 
 /// A received UDP packet with its source address and receive timestamp.
@@ -22,12 +54,18 @@ impl TimestampedSocket {
     /// Bind to the given address (e.g. "0.0.0.0:123" or "127.0.0.1:0").
     pub async fn bind(addr: &str) -> Result<Self, std::io::Error> {
         let socket = UdpSocket::bind(addr).await?;
-        Ok(Self { inner: socket })
+        Ok(Self {
+            inner: socket,
+            mode: TimestampMode::Userspace,
+        })
     }
 
     /// Wrap an already-bound tokio UdpSocket.
     pub fn from_socket(socket: UdpSocket) -> Self {
-        Self { inner: socket }
+        Self {
+            inner: socket,
+            mode: TimestampMode::Userspace,
+        }
     }
 
     /// Send data to the given address and return the transmit timestamp.
@@ -70,6 +108,93 @@ impl TimestampedSocket {
     /// Get a reference to the inner tokio UdpSocket.
     pub fn inner(&self) -> &UdpSocket {
         &self.inner
+    }
+
+    /// Current timestamping mode.
+    pub fn timestamp_mode(&self) -> TimestampMode {
+        self.mode
+    }
+
+    /// Enable kernel software timestamps via `SO_TIMESTAMPNS`.
+    ///
+    /// This requests nanosecond-resolution software timestamps from the kernel.
+    /// The kernel timestamps packets in the network stack, which is more accurate
+    /// than userspace timestamps taken after the syscall returns.
+    pub fn enable_software_timestamps(&mut self) -> std::io::Result<()> {
+        let val: libc::c_int = 1;
+        let fd = self.inner.as_raw_fd();
+
+        let ret = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                SO_TIMESTAMPNS,
+                &val as *const libc::c_int as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        self.mode = TimestampMode::Software;
+        Ok(())
+    }
+
+    /// Enable hardware timestamps via `SO_TIMESTAMPING`.
+    ///
+    /// Attempts to enable hardware timestamping using `SOF_TIMESTAMPING_TX_HARDWARE`,
+    /// `SOF_TIMESTAMPING_RX_HARDWARE`, and `SOF_TIMESTAMPING_RAW_HARDWARE`. If hardware
+    /// timestamping is not supported by the NIC, falls back to software timestamping
+    /// via `SO_TIMESTAMPING` with the software flags.
+    ///
+    /// Returns `Ok(true)` if hardware timestamping is active, `Ok(false)` if it
+    /// fell back to software timestamping.
+    pub fn enable_hardware_timestamps(&mut self) -> std::io::Result<bool> {
+        let fd = self.inner.as_raw_fd();
+
+        // Try hardware first.
+        let hw_flags: u32 = SOF_TIMESTAMPING_TX_HARDWARE
+            | SOF_TIMESTAMPING_RX_HARDWARE
+            | SOF_TIMESTAMPING_RAW_HARDWARE;
+
+        let ret = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                SO_TIMESTAMPING,
+                &hw_flags as *const u32 as *const libc::c_void,
+                std::mem::size_of::<u32>() as libc::socklen_t,
+            )
+        };
+
+        if ret == 0 {
+            self.mode = TimestampMode::Hardware;
+            return Ok(true);
+        }
+
+        // Hardware not available -- fall back to software via SO_TIMESTAMPING.
+        let sw_flags: u32 = SOF_TIMESTAMPING_TX_SOFTWARE
+            | SOF_TIMESTAMPING_RX_SOFTWARE
+            | SOF_TIMESTAMPING_SOFTWARE;
+
+        let ret = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                SO_TIMESTAMPING,
+                &sw_flags as *const u32 as *const libc::c_void,
+                std::mem::size_of::<u32>() as libc::socklen_t,
+            )
+        };
+
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        self.mode = TimestampMode::Software;
+        Ok(false)
     }
 }
 
