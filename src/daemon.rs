@@ -12,6 +12,7 @@ use rtime_core::selection::select_sources;
 use rtime_core::servo::ServoConfig;
 use rtime_core::source::{SourceId, SourceMeasurement};
 use rtime_core::timestamp::NtpDuration;
+use rtime_metrics::instruments;
 use rtime_ntp::server::ServerState;
 
 use crate::clock_discipline;
@@ -58,6 +59,59 @@ impl Daemon {
     pub async fn run(&mut self) -> Result<()> {
         info!("rTime daemon starting");
 
+        let start_time = tokio::time::Instant::now();
+
+        // Spawn metrics exporter if enabled.
+        let metrics_handle = if self.config.metrics.enabled {
+            let metrics_addr: SocketAddr = self
+                .config
+                .metrics
+                .listen
+                .parse()
+                .context(format!(
+                    "invalid metrics listen address: {}",
+                    self.config.metrics.listen
+                ))?;
+
+            let exporter = rtime_metrics::exporter::MetricsExporter::new();
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = exporter.serve(metrics_addr).await {
+                    error!("Metrics server exited with error: {}", e);
+                }
+            });
+
+            info!("Metrics exporter enabled on {}", self.config.metrics.listen);
+            Some(handle)
+        } else {
+            info!("Metrics exporter disabled");
+            None
+        };
+
+        // Spawn uptime recording task if metrics are enabled.
+        let uptime_handle = if self.config.metrics.enabled {
+            let shutdown = self.shutdown_rx.clone();
+            let handle = tokio::spawn(async move {
+                let mut shutdown = shutdown;
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            instruments::record_uptime(start_time.elapsed().as_secs_f64());
+                        }
+                        result = shutdown.changed() => {
+                            if result.is_ok() && *shutdown.borrow() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            Some(handle)
+        } else {
+            None
+        };
+
         // Shared server state, updated by the selection task.
         let server_state = Arc::new(RwLock::new(ServerState::default()));
 
@@ -71,9 +125,10 @@ impl Daemon {
 
             let tx = self.measurement_tx.as_ref().expect("measurement_tx taken").clone();
             let shutdown = self.shutdown_rx.clone();
+            let metrics_enabled = self.config.metrics.enabled;
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = ntp_client::run_ntp_client(addr, tx, shutdown).await {
+                if let Err(e) = ntp_client::run_ntp_client(addr, tx, shutdown, metrics_enabled).await {
                     error!("NTP client for {} exited with error: {}", addr, e);
                 }
             });
@@ -99,9 +154,10 @@ impl Daemon {
 
             let state = Arc::clone(&server_state);
             let shutdown = self.shutdown_rx.clone();
+            let metrics_enabled = self.config.metrics.enabled;
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = ntp_server::run_ntp_server(listen_addr, state, shutdown).await {
+                if let Err(e) = ntp_server::run_ntp_server(listen_addr, state, shutdown, metrics_enabled).await {
                     error!("NTP server exited with error: {}", e);
                 }
             });
@@ -118,6 +174,7 @@ impl Daemon {
             let clock: Arc<dyn Clock> = Arc::new(UnixClock::new());
             let offset_rx = self.offset_rx.clone();
             let shutdown = self.shutdown_rx.clone();
+            let metrics_enabled = self.config.metrics.enabled;
 
             let servo_config = ServoConfig {
                 step_threshold_ns: self.config.clock.step_threshold_ms * 1_000_000.0,
@@ -137,6 +194,7 @@ impl Daemon {
                     DEFAULT_POLL_INTERVAL_SECS,
                     servo_config,
                     shutdown,
+                    metrics_enabled,
                 )
                 .await
                 {
@@ -155,7 +213,9 @@ impl Daemon {
         drop(self.measurement_tx.take());
 
         // Run the selection loop in the current task.
-        self.run_selection_loop(Arc::clone(&server_state)).await;
+        let metrics_enabled = self.config.metrics.enabled;
+        self.run_selection_loop(Arc::clone(&server_state), metrics_enabled)
+            .await;
 
         // Signal shutdown to all tasks.
         let _ = self.shutdown_tx.send(true);
@@ -175,6 +235,15 @@ impl Daemon {
             let _ = handle.await;
         }
 
+        // Wait for metrics tasks to finish.
+        if let Some(handle) = metrics_handle {
+            handle.abort();
+            let _ = handle.await;
+        }
+        if let Some(handle) = uptime_handle {
+            let _ = handle.await;
+        }
+
         info!("rTime daemon stopped");
         Ok(())
     }
@@ -182,7 +251,11 @@ impl Daemon {
     /// The selection loop receives measurements from NTP client tasks,
     /// runs Marzullo's algorithm / source selection, and updates the server state.
     /// When a system offset is computed, it is sent to the clock discipline task.
-    async fn run_selection_loop(&mut self, server_state: Arc<RwLock<ServerState>>) {
+    async fn run_selection_loop(
+        &mut self,
+        server_state: Arc<RwLock<ServerState>>,
+        metrics_enabled: bool,
+    ) {
         // Collect recent measurements per source. We keep the latest measurement
         // from each source for the selection algorithm.
         let mut latest_measurements: std::collections::HashMap<
@@ -223,6 +296,13 @@ impl Daemon {
                             result.system_jitter * 1000.0,
                         );
 
+                        // Record selection metrics.
+                        if metrics_enabled {
+                            instruments::record_selection_truechimers(result.truechimers.len());
+                            instruments::record_selection_falsetickers(result.falsetickers.len());
+                            instruments::record_clock_jitter(result.system_jitter);
+                        }
+
                         if let Some(ref peer_id) = result.system_peer {
                             // Find the measurement for the selected system peer.
                             if let Some(selected) = measurements.iter().find(|m| m.id == *peer_id) {
@@ -243,10 +323,22 @@ impl Daemon {
                                     "Server state updated: stratum={} ref_id=0x{:08x} peer={}",
                                     state.stratum, state.reference_id, peer_id,
                                 );
+
+                                // Record clock stratum metric.
+                                if metrics_enabled {
+                                    instruments::record_clock_stratum(state.stratum);
+                                }
                             }
 
                             // Send system offset to clock discipline task.
                             let _ = self.offset_tx.send(Some(result.system_offset));
+
+                            // Record system offset metric.
+                            if metrics_enabled {
+                                instruments::record_clock_offset(
+                                    result.system_offset.to_seconds_f64(),
+                                );
+                            }
                         } else {
                             warn!(
                                 "No system peer selected ({} measurements, {} truechimers)",

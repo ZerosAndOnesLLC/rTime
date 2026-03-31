@@ -38,6 +38,10 @@ struct Cli {
     /// Log level
     #[arg(short, long, default_value = "info")]
     log_level: String,
+
+    /// Output logs as JSON (structured logging)
+    #[arg(long)]
+    json_log: bool,
 }
 
 fn resolve_server(server: &str) -> Result<SocketAddr> {
@@ -115,12 +119,19 @@ fn load_config(path: &str) -> Result<RtimeConfig> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cli.log_level)),
-        )
-        .init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cli.log_level));
+
+    if cli.json_log {
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(env_filter)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    }
 
     if let Some(server) = &cli.server {
         // Single-query mode: query a specific NTP server.

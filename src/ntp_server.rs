@@ -7,6 +7,7 @@ use tokio::sync::{RwLock, watch};
 use tracing::{debug, info, warn};
 
 use rtime_core::timestamp::NtpTimestamp;
+use rtime_metrics::instruments;
 use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
 use rtime_ntp::server::{ServerState, build_response, validate_request};
 
@@ -21,6 +22,7 @@ pub async fn run_ntp_server(
     listen_addr: SocketAddr,
     server_state: Arc<RwLock<ServerState>>,
     mut shutdown: watch::Receiver<bool>,
+    metrics_enabled: bool,
 ) -> Result<()> {
     let socket = UdpSocket::bind(listen_addr)
         .await
@@ -38,14 +40,30 @@ pub async fn run_ntp_server(
                         // Record receive timestamp as early as possible.
                         let receive_ts = NtpTimestamp::now();
 
-                        if let Err(e) = handle_request(
+                        // Record incoming packet metric.
+                        if metrics_enabled {
+                            instruments::increment_ntp_packets_received();
+                        }
+
+                        match handle_request(
                             &socket,
                             &buf[..len],
                             client_addr,
                             receive_ts,
                             &server_state,
                         ).await {
-                            debug!("Dropped request from {}: {}", client_addr, e);
+                            Ok(()) => {
+                                // Record outgoing packet metric.
+                                if metrics_enabled {
+                                    instruments::increment_ntp_packets_sent();
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Dropped request from {}: {}", client_addr, e);
+                                if metrics_enabled {
+                                    instruments::increment_ntp_packets_dropped();
+                                }
+                            }
                         }
                     }
                     Err(e) => {

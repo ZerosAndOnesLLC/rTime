@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 use rtime_core::clock::Clock;
 use rtime_core::servo::{PiServo, ServoAction, ServoConfig};
 use rtime_core::timestamp::NtpDuration;
+use rtime_metrics::instruments;
 
 /// Async task that disciplines the system clock based on offset measurements.
 ///
@@ -20,6 +21,7 @@ pub async fn run_clock_discipline(
     poll_interval_secs: f64,
     config: ServoConfig,
     mut shutdown: watch::Receiver<bool>,
+    metrics_enabled: bool,
 ) -> anyhow::Result<()> {
     let mut servo = PiServo::new(config);
 
@@ -33,6 +35,12 @@ pub async fn run_clock_discipline(
                 if let Some(offset) = *offset_rx.borrow() {
                     let offset_ns = offset.to_nanos() as f64;
                     let action = servo.sample(offset_ns, poll_interval_secs);
+
+                    // Record clock offset and frequency metrics.
+                    if metrics_enabled {
+                        instruments::record_clock_offset(offset.to_seconds_f64());
+                        instruments::record_clock_frequency(servo.frequency());
+                    }
 
                     match action {
                         ServoAction::AdjustFrequency { ppm } => {

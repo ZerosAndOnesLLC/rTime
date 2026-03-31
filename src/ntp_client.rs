@@ -7,6 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use rtime_core::source::{SourceId, SourceMeasurement};
 use rtime_core::timestamp::NtpTimestamp;
+use rtime_metrics::instruments;
 use rtime_ntp::client;
 use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
 
@@ -33,6 +34,7 @@ pub async fn run_ntp_client(
     server_addr: SocketAddr,
     measurement_tx: mpsc::Sender<SourceMeasurement>,
     mut shutdown: watch::Receiver<bool>,
+    metrics_enabled: bool,
 ) -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
@@ -43,6 +45,7 @@ pub async fn run_ntp_client(
     let mut query_count: u64 = 0;
     let mut jitter_samples: Vec<f64> = Vec::new();
     let mut last_offset_ms: Option<f64> = None;
+    let peer_label = server_addr.to_string();
 
     loop {
         // Determine poll interval: fast during initial burst, normal after.
@@ -62,6 +65,20 @@ pub async fn run_ntp_client(
                     "NTP response from {}: offset={:+.3}ms delay={:.3}ms stratum={}",
                     server_addr, offset_ms, delay_ms, result.stratum,
                 );
+
+                // Record packet metrics.
+                if metrics_enabled {
+                    instruments::increment_ntp_packets_sent();
+                    instruments::increment_ntp_packets_received();
+                    instruments::record_ntp_source_offset(
+                        &peer_label,
+                        result.offset.to_seconds_f64(),
+                    );
+                    instruments::record_ntp_source_delay(
+                        &peer_label,
+                        result.delay.to_seconds_f64(),
+                    );
+                }
 
                 // Update jitter estimate (RMS of successive offset differences).
                 let jitter = if let Some(prev) = last_offset_ms {
@@ -103,6 +120,11 @@ pub async fn run_ntp_client(
             }
             Err(e) => {
                 error!("NTP query to {} failed: {}", server_addr, e);
+                // Record a dropped packet on failure.
+                if metrics_enabled {
+                    instruments::increment_ntp_packets_sent();
+                    instruments::increment_ntp_packets_dropped();
+                }
             }
         }
 

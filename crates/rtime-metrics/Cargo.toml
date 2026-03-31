@@ -8,3 +8,8 @@ description = "Prometheus metrics exporter for rTime"
 
 [dependencies]
 rtime-core = { workspace = true }
+axum = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 authors = ["Zeros And Ones LLC"]
@@ -76,6 +76,7 @@ rtime-core = { workspace = true }
 rtime-ntp = { workspace = true }
 rtime-net = { workspace = true }
 rtime-clock = { workspace = true }
+rtime-metrics = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
