@@ -16,6 +16,7 @@ use rtime_metrics::instruments;
 use rtime_ntp::server::ServerState;
 
 use crate::clock_discipline;
+use crate::management::{self, DaemonStatus, SourceStatus};
 use crate::ntp_client;
 use crate::ntp_server;
 
@@ -35,6 +36,7 @@ pub struct Daemon {
     offset_rx: watch::Receiver<Option<NtpDuration>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
+    daemon_status: Arc<RwLock<DaemonStatus>>,
 }
 
 impl Daemon {
@@ -51,6 +53,7 @@ impl Daemon {
             offset_rx,
             shutdown_tx,
             shutdown_rx,
+            daemon_status: Arc::new(RwLock::new(DaemonStatus::new())),
         }
     }
 
@@ -109,6 +112,37 @@ impl Daemon {
             });
             Some(handle)
         } else {
+            None
+        };
+
+        // Spawn management API if enabled.
+        let management_handle = if self.config.management.enabled {
+            let mgmt_addr: SocketAddr = self
+                .config
+                .management
+                .listen
+                .parse()
+                .context(format!(
+                    "invalid management listen address: {}",
+                    self.config.management.listen
+                ))?;
+
+            let status = Arc::clone(&self.daemon_status);
+            let router = management::management_router(status);
+            let listener = tokio::net::TcpListener::bind(mgmt_addr)
+                .await
+                .context(format!("failed to bind management API on {}", mgmt_addr))?;
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = axum::serve(listener, router).await {
+                    error!("Management API exited with error: {}", e);
+                }
+            });
+
+            info!("Management API enabled on {}", self.config.management.listen);
+            Some(handle)
+        } else {
+            info!("Management API disabled");
             None
         };
 
@@ -214,7 +248,8 @@ impl Daemon {
 
         // Run the selection loop in the current task.
         let metrics_enabled = self.config.metrics.enabled;
-        self.run_selection_loop(Arc::clone(&server_state), metrics_enabled)
+        let daemon_status = Arc::clone(&self.daemon_status);
+        self.run_selection_loop(Arc::clone(&server_state), metrics_enabled, daemon_status)
             .await;
 
         // Signal shutdown to all tasks.
@@ -244,6 +279,12 @@ impl Daemon {
             let _ = handle.await;
         }
 
+        // Wait for management API to finish.
+        if let Some(handle) = management_handle {
+            handle.abort();
+            let _ = handle.await;
+        }
+
         info!("rTime daemon stopped");
         Ok(())
     }
@@ -255,6 +296,7 @@ impl Daemon {
         &mut self,
         server_state: Arc<RwLock<ServerState>>,
         metrics_enabled: bool,
+        daemon_status: Arc<RwLock<DaemonStatus>>,
     ) {
         // Collect recent measurements per source. We keep the latest measurement
         // from each source for the selection algorithm.
@@ -345,6 +387,41 @@ impl Daemon {
                                 measurements.len(),
                                 result.truechimers.len(),
                             );
+                        }
+
+                        // Update management API status.
+                        {
+                            let mut mgmt = daemon_status.write().await;
+
+                            let synchronized = result.system_peer.is_some();
+                            let stratum = if let Some(ref peer_id) = result.system_peer {
+                                measurements.iter()
+                                    .find(|m| m.id == *peer_id)
+                                    .map(|m| m.stratum.saturating_add(1))
+                                    .unwrap_or(16)
+                            } else {
+                                16
+                            };
+
+                            mgmt.clock.offset_ms = sys_offset_ms;
+                            mgmt.clock.jitter_ms = result.system_jitter * 1000.0;
+                            mgmt.clock.stratum = stratum;
+                            mgmt.clock.synchronized = synchronized;
+
+                            mgmt.sources = measurements.iter().map(|m| {
+                                let selected = result.system_peer.as_ref()
+                                    .is_some_and(|peer| *peer == m.id);
+                                let reachable = result.truechimers.contains(&m.id);
+                                SourceStatus {
+                                    id: m.id.to_string(),
+                                    offset_ms: m.offset.to_millis_f64(),
+                                    delay_ms: m.delay.to_millis_f64(),
+                                    jitter_ms: m.jitter * 1000.0,
+                                    stratum: m.stratum,
+                                    reachable,
+                                    selected,
+                                }
+                            }).collect();
                         }
                     }
                 }

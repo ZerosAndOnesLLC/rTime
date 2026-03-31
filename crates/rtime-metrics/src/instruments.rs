@@ -59,6 +59,11 @@ pub fn increment_ntp_packets_dropped() {
     counter!("rtime_ntp_packets_dropped_total").increment(1);
 }
 
+/// Increment the count of NTP requests that were rate-limited (KoD RATE sent).
+pub fn increment_ntp_rate_limited() {
+    counter!("rtime_ntp_rate_limited_total").increment(1);
+}
+
 // ─── Selection ─────────────────────────────────────────────────────────────
 
 /// Record the number of truechimers from the latest selection round.

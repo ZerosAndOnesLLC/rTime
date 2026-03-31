@@ -12,6 +12,8 @@ pub struct RtimeConfig {
     pub ptp: PtpConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub management: ManagementConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -197,4 +199,25 @@ impl Default for MetricsConfig {
 
 fn default_metrics_listen() -> String {
     "127.0.0.1:9100".into()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ManagementConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_management_listen")]
+    pub listen: String,
+}
+
+impl Default for ManagementConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen: default_management_listen(),
+        }
+    }
+}
+
+fn default_management_listen() -> String {
+    "127.0.0.1:9200".into()
 }

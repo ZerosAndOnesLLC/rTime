@@ -1,0 +1,29 @@
+[general]
+log_level = "info"
+
+[clock]
+discipline = true
+step_threshold_ms = 128
+panic_threshold_ms = 1000
+interface = "system"
+
+[ntp]
+enabled = true
+listen = "0.0.0.0:123"
+
+[[ntp.sources]]
+address = "time.cloudflare.com:123"
+nts = true
+
+[[ntp.sources]]
+address = "time.google.com:123"
+
+[[ntp.sources]]
+address = "pool.ntp.org:123"
+
+[[ntp.sources]]
+address = "time.apple.com:123"
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9100"

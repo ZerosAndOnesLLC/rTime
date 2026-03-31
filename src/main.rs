@@ -13,6 +13,7 @@ use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
 
 mod clock_discipline;
 mod daemon;
+mod management;
 mod ntp_client;
 mod ntp_server;
 
@@ -146,10 +147,15 @@ async fn main() -> Result<()> {
 
         info!("rTime v{}", env!("CARGO_PKG_VERSION"));
         info!(
-            "Config: {} NTP sources, server={}, listen={}",
+            "Config: {} NTP sources, server={}, listen={}, management={}",
             config.ntp.sources.len(),
             if config.ntp.enabled { "enabled" } else { "disabled" },
             config.ntp.listen,
+            if config.management.enabled {
+                config.management.listen.as_str()
+            } else {
+                "disabled"
+            },
         );
 
         let mut daemon = daemon::Daemon::new(config);

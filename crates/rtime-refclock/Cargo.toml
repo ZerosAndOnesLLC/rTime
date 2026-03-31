@@ -9,3 +9,11 @@ description = "Reference clock drivers (GPS/PPS) for rTime"
 [dependencies]
 rtime-core = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+libc = { workspace = true }
+
+[features]
+default = []
+gps = []
+pps = []

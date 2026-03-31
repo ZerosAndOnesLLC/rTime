@@ -1,21 +1,118 @@
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use tokio::net::UdpSocket;
 use tokio::sync::{RwLock, watch};
 use tracing::{debug, info, warn};
 
+use rtime_core::clock::LeapIndicator;
 use rtime_core::timestamp::NtpTimestamp;
 use rtime_metrics::instruments;
-use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
+use rtime_ntp::packet::{NTP_HEADER_SIZE, NTP_VERSION, NtpMode, NtpPacket};
 use rtime_ntp::server::{ServerState, build_response, validate_request};
+
+// ─── Rate limiter ──────────────────────────────────────────────────────────
+
+/// Per-token-bucket state for rate limiting.
+struct TokenBucket {
+    tokens: f64,
+    last_update: Instant,
+}
+
+/// Simple per-IP rate limiter using the token bucket algorithm.
+struct RateLimiter {
+    buckets: HashMap<IpAddr, TokenBucket>,
+    max_rate: f64, // tokens per second
+    burst: u32,    // max burst size
+}
+
+impl RateLimiter {
+    fn new(max_rate: f64, burst: u32) -> Self {
+        Self {
+            buckets: HashMap::new(),
+            max_rate,
+            burst,
+        }
+    }
+
+    /// Check whether the given IP is allowed to send a request right now.
+    /// Returns `true` if the request is allowed, `false` if rate-limited.
+    fn allow(&mut self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let burst = self.burst as f64;
+        let max_rate = self.max_rate;
+
+        let bucket = self.buckets.entry(ip).or_insert_with(|| TokenBucket {
+            tokens: burst,
+            last_update: now,
+        });
+
+        // Refill tokens based on elapsed time.
+        let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * max_rate).min(burst);
+        bucket.last_update = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove stale buckets that have not been updated since `older_than`.
+    fn cleanup(&mut self, older_than: Instant) {
+        self.buckets.retain(|_, bucket| bucket.last_update > older_than);
+    }
+}
+
+/// Build a Kiss-o'-Death (KoD) packet with the RATE code.
+///
+/// Per RFC 5905, a KoD packet has stratum 0 and the reference ID set to
+/// an ASCII kiss code (here "RATE").
+fn build_kod_rate_response(request: &NtpPacket, receive_ts: NtpTimestamp) -> NtpPacket {
+    NtpPacket {
+        leap_indicator: LeapIndicator::AlarmUnsynchronized,
+        version: NTP_VERSION,
+        mode: NtpMode::Server,
+        stratum: 0,
+        poll: request.poll,
+        precision: -20,
+        root_delay: 0,
+        root_dispersion: 0,
+        reference_id: u32::from_be_bytes(*b"RATE"),
+        reference_ts: NtpTimestamp::ZERO,
+        origin_ts: request.transmit_ts,
+        receive_ts,
+        transmit_ts: NtpTimestamp::now(),
+    }
+}
+
+// ─── NTP server ────────────────────────────────────────────────────────────
+
+/// Default maximum request rate per IP (requests per second).
+const DEFAULT_RATE_LIMIT: f64 = 16.0;
+
+/// Default burst size (max tokens accumulated).
+const DEFAULT_BURST: u32 = 32;
+
+/// How often to purge stale rate-limiter buckets (seconds).
+const CLEANUP_INTERVAL_SECS: u64 = 300;
+
+/// Buckets older than this many seconds are removed during cleanup.
+const BUCKET_MAX_AGE_SECS: u64 = 600;
 
 /// Run the async NTP server task.
 ///
 /// Binds a UDP socket on the given listen address and responds to incoming
 /// NTP client requests. The server state (stratum, reference info, etc.) is
 /// updated by the selection task as clock synchronization progresses.
+///
+/// Includes per-IP rate limiting: clients that exceed the configured rate
+/// receive a KoD (Kiss-o'-Death) response with code "RATE".
 ///
 /// Logs errors on bad packets but does not crash -- resilient to malformed input.
 pub async fn run_ntp_server(
@@ -31,6 +128,11 @@ pub async fn run_ntp_server(
     info!("NTP server listening on {}", listen_addr);
 
     let mut buf = [0u8; 512];
+    let mut rate_limiter = RateLimiter::new(DEFAULT_RATE_LIMIT, DEFAULT_BURST);
+    let mut cleanup_interval =
+        tokio::time::interval(tokio::time::Duration::from_secs(CLEANUP_INTERVAL_SECS));
+    // The first tick completes immediately -- consume it.
+    cleanup_interval.tick().await;
 
     loop {
         tokio::select! {
@@ -43,6 +145,26 @@ pub async fn run_ntp_server(
                         // Record incoming packet metric.
                         if metrics_enabled {
                             instruments::increment_ntp_packets_received();
+                        }
+
+                        // Per-IP rate limiting check.
+                        if !rate_limiter.allow(client_addr.ip()) {
+                            debug!("Rate-limiting client {}", client_addr);
+                            if metrics_enabled {
+                                instruments::increment_ntp_rate_limited();
+                            }
+
+                            // Attempt to send a KoD RATE packet. We need a
+                            // minimally parsed request to copy the origin
+                            // timestamp. If the packet is too short to parse,
+                            // just drop silently.
+                            if len >= NTP_HEADER_SIZE {
+                                if let Ok(request) = NtpPacket::parse(&buf[..len]) {
+                                    let kod = build_kod_rate_response(&request, receive_ts);
+                                    let _ = socket.send_to(&kod.serialize(), client_addr).await;
+                                }
+                            }
+                            continue;
                         }
 
                         match handle_request(
@@ -70,6 +192,15 @@ pub async fn run_ntp_server(
                         // Log but don't crash on transient socket errors.
                         warn!("NTP server recv error: {}", e);
                     }
+                }
+            }
+            _ = cleanup_interval.tick() => {
+                let cutoff = Instant::now() - std::time::Duration::from_secs(BUCKET_MAX_AGE_SECS);
+                let before = rate_limiter.buckets.len();
+                rate_limiter.cleanup(cutoff);
+                let removed = before - rate_limiter.buckets.len();
+                if removed > 0 {
+                    debug!("Rate limiter cleanup: removed {} stale buckets", removed);
                 }
             }
             result = shutdown.changed() => {
@@ -119,4 +250,74 @@ async fn handle_request(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limiter_allows_within_burst() {
+        let mut rl = RateLimiter::new(10.0, 5);
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+
+        // Should allow up to burst count immediately.
+        for _ in 0..5 {
+            assert!(rl.allow(ip));
+        }
+    }
+
+    #[test]
+    fn rate_limiter_blocks_after_burst() {
+        let mut rl = RateLimiter::new(10.0, 3);
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+
+        // Exhaust burst.
+        for _ in 0..3 {
+            assert!(rl.allow(ip));
+        }
+
+        // Next request should be blocked.
+        assert!(!rl.allow(ip));
+    }
+
+    #[test]
+    fn rate_limiter_independent_ips() {
+        let mut rl = RateLimiter::new(10.0, 2);
+        let ip1: IpAddr = "10.0.0.1".parse().unwrap();
+        let ip2: IpAddr = "10.0.0.2".parse().unwrap();
+
+        // Exhaust ip1 burst.
+        assert!(rl.allow(ip1));
+        assert!(rl.allow(ip1));
+        assert!(!rl.allow(ip1));
+
+        // ip2 should still be allowed.
+        assert!(rl.allow(ip2));
+    }
+
+    #[test]
+    fn rate_limiter_cleanup() {
+        let mut rl = RateLimiter::new(10.0, 5);
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        rl.allow(ip);
+        assert_eq!(rl.buckets.len(), 1);
+
+        // Cleanup with a cutoff in the future should remove the bucket.
+        rl.cleanup(Instant::now() + std::time::Duration::from_secs(1));
+        assert!(rl.buckets.is_empty());
+    }
+
+    #[test]
+    fn kod_rate_response_fields() {
+        let request = NtpPacket::new_client_request(NtpTimestamp::new(1000, 1));
+        let receive_ts = NtpTimestamp::new(1000, 100);
+        let kod = build_kod_rate_response(&request, receive_ts);
+
+        assert_eq!(kod.stratum, 0);
+        assert_eq!(kod.reference_id, u32::from_be_bytes(*b"RATE"));
+        assert_eq!(kod.mode, NtpMode::Server);
+        assert_eq!(kod.origin_ts, request.transmit_ts);
+        assert_eq!(kod.receive_ts, receive_ts);
+    }
 }
