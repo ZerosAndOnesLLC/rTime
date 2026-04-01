@@ -1,5 +1,3 @@
-use std::path::Path;
-
 /// Timestamping capabilities of a network interface.
 #[derive(Debug, Clone)]
 pub struct TimestampCapabilities {
@@ -10,7 +8,7 @@ pub struct TimestampCapabilities {
 }
 
 impl TimestampCapabilities {
-    /// Query the timestamping capabilities of a network interface.
+    /// Query the timestamping capabilities of a network interface (Linux).
     ///
     /// Uses a best-effort approach:
     /// 1. Checks if the interface exists via `/sys/class/net/{iface}`.
@@ -20,7 +18,10 @@ impl TimestampCapabilities {
     /// 4. Falls back to `software_only()` if detection fails.
     ///
     /// Software timestamping is always assumed available on Linux (kernel provides it).
+    #[cfg(target_os = "linux")]
     pub fn query(interface_name: &str) -> std::io::Result<Self> {
+        use std::path::Path;
+
         // Validate interface name (prevent path traversal).
         if interface_name.contains('/') || interface_name.contains('\0') {
             return Err(std::io::Error::new(
@@ -54,6 +55,46 @@ impl TimestampCapabilities {
         Ok(Self::software_only())
     }
 
+    /// Query the timestamping capabilities of a network interface (FreeBSD).
+    ///
+    /// Verifies the interface exists using `if_nametoindex()`. FreeBSD does not
+    /// expose hardware timestamp capabilities through ethtool, so software-only
+    /// timestamps are assumed.
+    #[cfg(target_os = "freebsd")]
+    pub fn query(interface_name: &str) -> std::io::Result<Self> {
+        // Validate interface name.
+        if interface_name.contains('/') || interface_name.contains('\0') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid interface name",
+            ));
+        }
+
+        // Verify interface exists using if_nametoindex.
+        use std::ffi::CString;
+        let c_name = CString::new(interface_name).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid interface name")
+        })?;
+        let idx = unsafe { libc::if_nametoindex(c_name.as_ptr()) };
+        if idx == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("interface not found: {interface_name}"),
+            ));
+        }
+
+        // FreeBSD: assume software-only timestamps.
+        Ok(Self::software_only())
+    }
+
+    /// Query the timestamping capabilities of a network interface (unsupported platform).
+    ///
+    /// Returns software-only capabilities as a safe fallback.
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    pub fn query(_interface_name: &str) -> std::io::Result<Self> {
+        Ok(Self::software_only())
+    }
+
     /// Return default software-only capabilities (fallback).
     pub fn software_only() -> Self {
         Self {
@@ -79,51 +120,56 @@ impl TimestampCapabilities {
         self.hardware_tx || self.hardware_rx
     }
 
-    /// Whether software timestamping is available (always true on Linux).
+    /// Whether software timestamping is available (always true on Linux/FreeBSD).
     pub fn has_software(&self) -> bool {
         self.software_tx || self.software_rx
     }
 }
 
 // ---------------------------------------------------------------------------
-// ETHTOOL ioctl-based timestamp capability query
+// Linux-specific ETHTOOL ioctl-based timestamp capability query
 // ---------------------------------------------------------------------------
+#[cfg(target_os = "linux")]
+mod ethtool {
+    /// ETHTOOL command number for `ETHTOOL_GET_TS_INFO`.
+    pub const ETHTOOL_GET_TS_INFO: u32 = 0x00000041;
 
-/// ETHTOOL command number for `ETHTOOL_GET_TS_INFO`.
-const ETHTOOL_GET_TS_INFO: u32 = 0x00000041;
+    /// SIOCETHTOOL ioctl request number.
+    pub const SIOCETHTOOL: libc::c_ulong = 0x8946;
 
-/// SIOCETHTOOL ioctl request number.
-const SIOCETHTOOL: libc::c_ulong = 0x8946;
+    /// SOF_TIMESTAMPING flag bits we care about.
+    pub const SOF_TIMESTAMPING_TX_HARDWARE: u32 = 1 << 0;
+    pub const SOF_TIMESTAMPING_TX_SOFTWARE: u32 = 1 << 1;
+    pub const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
+    pub const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
 
-/// SOF_TIMESTAMPING flag bits we care about.
-const SOF_TIMESTAMPING_TX_HARDWARE: u32 = 1 << 0;
-const SOF_TIMESTAMPING_TX_SOFTWARE: u32 = 1 << 1;
-const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
-const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
+    /// Kernel struct `ethtool_ts_info` (simplified -- we only read the first fields).
+    /// See linux/ethtool.h.
+    #[repr(C)]
+    pub struct EthtoolTsInfo {
+        pub cmd: u32,
+        pub so_timestamping: u32,
+        pub phc_index: i32,
+        pub tx_types: u32,
+        pub tx_reserved: [u32; 3],
+        pub rx_filters: u32,
+        pub rx_reserved: [u32; 3],
+    }
 
-/// Kernel struct `ethtool_ts_info` (simplified -- we only read the first fields).
-/// See linux/ethtool.h.
-#[repr(C)]
-struct EthtoolTsInfo {
-    cmd: u32,
-    so_timestamping: u32,
-    phc_index: i32,
-    tx_types: u32,
-    tx_reserved: [u32; 3],
-    rx_filters: u32,
-    rx_reserved: [u32; 3],
+    /// Kernel struct `ifreq` -- 40 bytes on x86_64.
+    /// We only use `ifr_name` (first 16 bytes) and `ifr_data` (pointer at offset 16).
+    #[repr(C)]
+    pub struct Ifreq {
+        pub ifr_name: [u8; libc::IFNAMSIZ],
+        pub ifr_data: *mut libc::c_void,
+    }
 }
 
-/// Kernel struct `ifreq` -- 40 bytes on x86_64.
-/// We only use `ifr_name` (first 16 bytes) and `ifr_data` (pointer at offset 16).
-#[repr(C)]
-struct Ifreq {
-    ifr_name: [u8; libc::IFNAMSIZ],
-    ifr_data: *mut libc::c_void,
-}
-
-/// Attempt to query timestamping capabilities via SIOCETHTOOL ioctl.
+/// Attempt to query timestamping capabilities via SIOCETHTOOL ioctl (Linux only).
+#[cfg(target_os = "linux")]
 fn query_ethtool_ts_info(interface_name: &str) -> std::io::Result<TimestampCapabilities> {
+    use ethtool::*;
+
     let mut ts_info: EthtoolTsInfo = unsafe { std::mem::zeroed() };
     ts_info.cmd = ETHTOOL_GET_TS_INFO;
 

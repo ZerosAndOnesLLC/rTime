@@ -5,21 +5,29 @@ use rtime_core::timestamp::NtpTimestamp;
 use tokio::net::UdpSocket;
 
 // ---------------------------------------------------------------------------
-// SO_TIMESTAMPING flag constants (linux/net_tstamp.h)
-// Defined here because libc may not expose them.
+// Platform-specific timestamping constants
 // ---------------------------------------------------------------------------
-const SOF_TIMESTAMPING_TX_HARDWARE: u32 = 1 << 0;
-const SOF_TIMESTAMPING_TX_SOFTWARE: u32 = 1 << 1;
-const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
-const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
-const SOF_TIMESTAMPING_SOFTWARE: u32 = 1 << 4;
-const SOF_TIMESTAMPING_RAW_HARDWARE: u32 = 1 << 6;
 
-/// `SO_TIMESTAMPING` socket option number (Linux).
-const SO_TIMESTAMPING: libc::c_int = 37;
+/// Linux-specific SO_TIMESTAMPING constants (linux/net_tstamp.h).
+/// Defined here because libc may not expose them.
+#[cfg(target_os = "linux")]
+mod timestamping {
+    pub const SO_TIMESTAMPING: libc::c_int = 37;
+    pub const SO_TIMESTAMPNS: libc::c_int = 35;
+    pub const SOF_TIMESTAMPING_TX_HARDWARE: u32 = 1 << 0;
+    pub const SOF_TIMESTAMPING_TX_SOFTWARE: u32 = 1 << 1;
+    pub const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
+    pub const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
+    pub const SOF_TIMESTAMPING_SOFTWARE: u32 = 1 << 4;
+    pub const SOF_TIMESTAMPING_RAW_HARDWARE: u32 = 1 << 6;
+}
 
-/// `SO_TIMESTAMPNS` socket option number (Linux).
-const SO_TIMESTAMPNS: libc::c_int = 35;
+/// FreeBSD uses SO_TIMESTAMP (microsecond-resolution timestamps).
+/// Hardware timestamping is not available through this socket API on FreeBSD.
+#[cfg(target_os = "freebsd")]
+mod timestamping {
+    pub const SO_TIMESTAMP: libc::c_int = 0x0400;
+}
 
 /// Timestamping mode currently active on the socket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,11 +123,13 @@ impl TimestampedSocket {
         self.mode
     }
 
-    /// Enable kernel software timestamps via `SO_TIMESTAMPNS`.
+    /// Enable kernel software timestamps.
     ///
-    /// This requests nanosecond-resolution software timestamps from the kernel.
+    /// On Linux, uses `SO_TIMESTAMPNS` for nanosecond-resolution software timestamps.
+    /// On FreeBSD, uses `SO_TIMESTAMP` for microsecond-resolution timestamps.
     /// The kernel timestamps packets in the network stack, which is more accurate
     /// than userspace timestamps taken after the syscall returns.
+    #[cfg(target_os = "linux")]
     pub fn enable_software_timestamps(&mut self) -> std::io::Result<()> {
         let val: libc::c_int = 1;
         let fd = self.inner.as_raw_fd();
@@ -128,7 +138,7 @@ impl TimestampedSocket {
             libc::setsockopt(
                 fd,
                 libc::SOL_SOCKET,
-                SO_TIMESTAMPNS,
+                timestamping::SO_TIMESTAMPNS,
                 &val as *const libc::c_int as *const libc::c_void,
                 std::mem::size_of::<libc::c_int>() as libc::socklen_t,
             )
@@ -142,7 +152,41 @@ impl TimestampedSocket {
         Ok(())
     }
 
-    /// Enable hardware timestamps via `SO_TIMESTAMPING`.
+    /// Enable kernel software timestamps.
+    ///
+    /// On FreeBSD, uses `SO_TIMESTAMP` for microsecond-resolution timestamps from
+    /// the kernel network stack.
+    #[cfg(target_os = "freebsd")]
+    pub fn enable_software_timestamps(&mut self) -> std::io::Result<()> {
+        let val: libc::c_int = 1;
+        let fd = self.inner.as_raw_fd();
+
+        let ret = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                timestamping::SO_TIMESTAMP,
+                &val as *const libc::c_int as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            )
+        };
+
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        self.mode = TimestampMode::Software;
+        Ok(())
+    }
+
+    /// Enable kernel software timestamps (unsupported platform fallback).
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    pub fn enable_software_timestamps(&mut self) -> std::io::Result<()> {
+        // No kernel timestamping available; remain in userspace mode.
+        Ok(())
+    }
+
+    /// Enable hardware timestamps via `SO_TIMESTAMPING` (Linux).
     ///
     /// Attempts to enable hardware timestamping using `SOF_TIMESTAMPING_TX_HARDWARE`,
     /// `SOF_TIMESTAMPING_RX_HARDWARE`, and `SOF_TIMESTAMPING_RAW_HARDWARE`. If hardware
@@ -151,19 +195,20 @@ impl TimestampedSocket {
     ///
     /// Returns `Ok(true)` if hardware timestamping is active, `Ok(false)` if it
     /// fell back to software timestamping.
+    #[cfg(target_os = "linux")]
     pub fn enable_hardware_timestamps(&mut self) -> std::io::Result<bool> {
         let fd = self.inner.as_raw_fd();
 
         // Try hardware first.
-        let hw_flags: u32 = SOF_TIMESTAMPING_TX_HARDWARE
-            | SOF_TIMESTAMPING_RX_HARDWARE
-            | SOF_TIMESTAMPING_RAW_HARDWARE;
+        let hw_flags: u32 = timestamping::SOF_TIMESTAMPING_TX_HARDWARE
+            | timestamping::SOF_TIMESTAMPING_RX_HARDWARE
+            | timestamping::SOF_TIMESTAMPING_RAW_HARDWARE;
 
         let ret = unsafe {
             libc::setsockopt(
                 fd,
                 libc::SOL_SOCKET,
-                SO_TIMESTAMPING,
+                timestamping::SO_TIMESTAMPING,
                 &hw_flags as *const u32 as *const libc::c_void,
                 std::mem::size_of::<u32>() as libc::socklen_t,
             )
@@ -175,15 +220,15 @@ impl TimestampedSocket {
         }
 
         // Hardware not available -- fall back to software via SO_TIMESTAMPING.
-        let sw_flags: u32 = SOF_TIMESTAMPING_TX_SOFTWARE
-            | SOF_TIMESTAMPING_RX_SOFTWARE
-            | SOF_TIMESTAMPING_SOFTWARE;
+        let sw_flags: u32 = timestamping::SOF_TIMESTAMPING_TX_SOFTWARE
+            | timestamping::SOF_TIMESTAMPING_RX_SOFTWARE
+            | timestamping::SOF_TIMESTAMPING_SOFTWARE;
 
         let ret = unsafe {
             libc::setsockopt(
                 fd,
                 libc::SOL_SOCKET,
-                SO_TIMESTAMPING,
+                timestamping::SO_TIMESTAMPING,
                 &sw_flags as *const u32 as *const libc::c_void,
                 std::mem::size_of::<u32>() as libc::socklen_t,
             )
@@ -194,6 +239,26 @@ impl TimestampedSocket {
         }
 
         self.mode = TimestampMode::Software;
+        Ok(false)
+    }
+
+    /// Enable hardware timestamps (FreeBSD).
+    ///
+    /// Hardware timestamping is not available through the FreeBSD socket API.
+    /// Returns `Ok(false)` to indicate software-only timestamps are active.
+    #[cfg(target_os = "freebsd")]
+    pub fn enable_hardware_timestamps(&mut self) -> std::io::Result<bool> {
+        // FreeBSD does not expose hardware timestamping through setsockopt.
+        // Fall back to software timestamps.
+        self.enable_software_timestamps()?;
+        Ok(false)
+    }
+
+    /// Enable hardware timestamps (unsupported platform fallback).
+    ///
+    /// Returns `Ok(false)` since hardware timestamping is not available.
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+    pub fn enable_hardware_timestamps(&mut self) -> std::io::Result<bool> {
         Ok(false)
     }
 }

@@ -1,3 +1,11 @@
+// Multicast support for PTP (IEEE 1588).
+//
+// This module is portable across Unix-like systems (Linux, FreeBSD, macOS).
+// All socket options used here (`IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP`,
+// `IP_MULTICAST_IF`, `IP_MULTICAST_LOOP`, `IP_MULTICAST_TTL`) and the
+// `ip_mreq` struct are part of the POSIX/BSD sockets API and are available
+// on both Linux and FreeBSD via the `libc` crate.
+
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 

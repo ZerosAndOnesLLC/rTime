@@ -2,6 +2,9 @@ use rtime_core::clock::LeapIndicator;
 use rtime_core::source::{SourceId, SourceMeasurement};
 use rtime_core::timestamp::{NtpDuration, NtpTimestamp};
 
+#[cfg(not(target_os = "linux"))]
+use crate::RefClockError;
+
 /// PPS edge timestamp.
 #[derive(Debug, Clone)]
 pub struct PpsEdge {
@@ -15,6 +18,7 @@ pub struct PpsEdge {
 //
 // The PPS_FETCH ioctl reads the most recent assert/clear edges from a PPS device.
 // Actual value depends on architecture; on x86-64 Linux this is 0xC00870A4.
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 const PPS_FETCH: u64 = 0xC00870A4;
 
@@ -113,9 +117,14 @@ impl PpsDriver {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Linux-specific PPS ioctl structures and helpers
+// ---------------------------------------------------------------------------
+
 /// C-compatible structures for Linux PPS ioctl (for future raw ioctl usage).
 ///
 /// These mirror the kernel's `struct pps_ktime` and `struct pps_fdata`.
+#[cfg(target_os = "linux")]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 #[allow(dead_code)]
@@ -125,6 +134,7 @@ struct PpsKtime {
     flags: u32,
 }
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 #[allow(dead_code)]
@@ -133,6 +143,7 @@ struct PpsFdata {
     timeout: PpsKtime,
 }
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 #[allow(dead_code)]
@@ -145,6 +156,7 @@ struct PpsKinfo {
 }
 
 /// Convert a Linux PPS kernel timestamp to an NtpTimestamp.
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 fn pps_ktime_to_ntp(ktime: &PpsKtime) -> NtpTimestamp {
     // PPS kernel time is in Unix epoch (seconds + nanoseconds).
@@ -153,6 +165,17 @@ fn pps_ktime_to_ntp(ktime: &PpsKtime) -> NtpTimestamp {
     let ntp_seconds = (ktime.sec as u64) + NTP_UNIX_DIFF;
     let fraction = ((ktime.nsec as u64) << 32) / 1_000_000_000;
     NtpTimestamp::new(ntp_seconds as u32, fraction as u32)
+}
+
+/// Fetch the latest PPS edge from a device (non-Linux stub).
+///
+/// PPS ioctl support is currently only implemented for Linux. On other
+/// platforms this returns an error indicating the feature is unavailable.
+#[cfg(not(target_os = "linux"))]
+pub fn fetch_pps_edge(_device: &str) -> Result<PpsEdge, RefClockError> {
+    Err(RefClockError::DeviceNotFound(
+        "PPS not supported on this platform".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -261,6 +284,7 @@ mod tests {
         assert_eq!(m.root_dispersion, NtpDuration::ZERO);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_pps_ktime_to_ntp() {
         let ktime = PpsKtime {
@@ -274,6 +298,7 @@ mod tests {
         assert_eq!(ts.fraction(), 0);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_pps_ktime_to_ntp_with_nanos() {
         let ktime = PpsKtime {
