@@ -136,7 +136,7 @@ impl Clock for PhcClock {
         }
 
         let nanos = offset.to_nanos();
-        let total_ns = ts.tv_sec as i64 * 1_000_000_000 + ts.tv_nsec as i64 + nanos;
+        let total_ns = ts.tv_sec * 1_000_000_000 + ts.tv_nsec + nanos;
 
         if total_ns < 0 {
             return Err(ClockError::Os(std::io::Error::new(

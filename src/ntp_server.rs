@@ -158,11 +158,9 @@ pub async fn run_ntp_server(
                             // minimally parsed request to copy the origin
                             // timestamp. If the packet is too short to parse,
                             // just drop silently.
-                            if len >= NTP_HEADER_SIZE {
-                                if let Ok(request) = NtpPacket::parse(&buf[..len]) {
-                                    let kod = build_kod_rate_response(&request, receive_ts);
-                                    let _ = socket.send_to(&kod.serialize(), client_addr).await;
-                                }
+                            if len >= NTP_HEADER_SIZE && let Ok(request) = NtpPacket::parse(&buf[..len]) {
+                                let kod = build_kod_rate_response(&request, receive_ts);
+                                let _ = socket.send_to(&kod.serialize(), client_addr).await;
                             }
                             continue;
                         }

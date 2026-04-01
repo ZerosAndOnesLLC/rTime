@@ -50,7 +50,7 @@ impl GpsFix {
 
 /// Compute number of days from NTP epoch (1900-01-01) to a given date.
 fn days_from_ntp_epoch(year: u16, month: u8, day: u8) -> Option<u64> {
-    if month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1900 {
         return None;
     }
 
@@ -77,7 +77,7 @@ fn days_from_ntp_epoch(year: u16, month: u8, day: u8) -> Option<u64> {
 }
 
 fn is_leap_year(y: u16) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 /// Validate NMEA checksum.

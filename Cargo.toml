@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 license = "MIT"
 authors = ["Zeros And Ones LLC"]
@@ -74,6 +74,8 @@ authors.workspace = true
 [dependencies]
 rtime-core = { workspace = true }
 rtime-ntp = { workspace = true }
+rtime-nts = { workspace = true }
+rtime-ptp = { workspace = true }
 rtime-net = { workspace = true }
 rtime-clock = { workspace = true }
 rtime-metrics = { workspace = true }
@@ -85,6 +87,7 @@ anyhow = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
 axum = { workspace = true }
+rand = { workspace = true }
 
 [features]
 default = ["ntp", "ptp", "nts", "clock-discipline", "metrics"]

@@ -53,7 +53,7 @@ pub fn validate_request(packet: &NtpPacket) -> Result<(), ServerError> {
         return Err(ServerError::NotClientRequest(packet.mode));
     }
 
-    if packet.version < 3 || packet.version > 4 {
+    if !(3..=4).contains(&packet.version) {
         return Err(ServerError::UnsupportedVersion(packet.version));
     }
 

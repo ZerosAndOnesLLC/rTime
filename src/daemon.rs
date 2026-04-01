@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use tokio::sync::{RwLock, mpsc, watch};
@@ -19,6 +20,7 @@ use crate::clock_discipline;
 use crate::management::{self, DaemonStatus, SourceStatus};
 use crate::ntp_client;
 use crate::ntp_server;
+use crate::ptp_node;
 
 /// Channel buffer size for source measurements.
 const MEASUREMENT_CHANNEL_SIZE: usize = 64;
@@ -37,6 +39,8 @@ pub struct Daemon {
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     daemon_status: Arc<RwLock<DaemonStatus>>,
+    /// Shared readiness flag: set to true after the first successful source selection.
+    ready: Arc<AtomicBool>,
 }
 
 impl Daemon {
@@ -54,6 +58,7 @@ impl Daemon {
             shutdown_tx,
             shutdown_rx,
             daemon_status: Arc::new(RwLock::new(DaemonStatus::new())),
+            ready: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -76,7 +81,7 @@ impl Daemon {
                     self.config.metrics.listen
                 ))?;
 
-            let exporter = rtime_metrics::exporter::MetricsExporter::new();
+            let exporter = rtime_metrics::exporter::MetricsExporter::new(Arc::clone(&self.ready));
 
             let handle = tokio::spawn(async move {
                 if let Err(e) = exporter.serve(metrics_addr).await {
@@ -170,8 +175,27 @@ impl Daemon {
             client_handles.push(handle);
         }
 
-        if client_handles.is_empty() {
-            warn!("No NTP sources configured -- daemon will not synchronize");
+        // Spawn PTP client node task if enabled.
+        let ptp_handle = if self.config.ptp.enabled {
+            let ptp_config = Arc::new(self.config.ptp.clone());
+            let tx = self.measurement_tx.as_ref().expect("measurement_tx taken").clone();
+            let shutdown = self.shutdown_rx.clone();
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = ptp_node::run_ptp_node(ptp_config, tx, shutdown).await {
+                    error!("PTP node exited with error: {}", e);
+                }
+            });
+
+            info!("PTP node enabled (domain={}, interface={})", self.config.ptp.domain, self.config.ptp.interface);
+            Some(handle)
+        } else {
+            info!("PTP node disabled");
+            None
+        };
+
+        if client_handles.is_empty() && !self.config.ptp.enabled {
+            warn!("No NTP sources or PTP configured -- daemon will not synchronize");
         }
 
         // Spawn NTP server task if enabled.
@@ -249,7 +273,8 @@ impl Daemon {
         // Run the selection loop in the current task.
         let metrics_enabled = self.config.metrics.enabled;
         let daemon_status = Arc::clone(&self.daemon_status);
-        self.run_selection_loop(Arc::clone(&server_state), metrics_enabled, daemon_status)
+        let ready = Arc::clone(&self.ready);
+        self.run_selection_loop(Arc::clone(&server_state), metrics_enabled, daemon_status, ready)
             .await;
 
         // Signal shutdown to all tasks.
@@ -262,6 +287,11 @@ impl Daemon {
 
         // Wait for server task to finish.
         if let Some(handle) = server_handle {
+            let _ = handle.await;
+        }
+
+        // Wait for PTP node task to finish.
+        if let Some(handle) = ptp_handle {
             let _ = handle.await;
         }
 
@@ -297,6 +327,7 @@ impl Daemon {
         server_state: Arc<RwLock<ServerState>>,
         metrics_enabled: bool,
         daemon_status: Arc<RwLock<DaemonStatus>>,
+        ready: Arc<AtomicBool>,
     ) {
         // Collect recent measurements per source. We keep the latest measurement
         // from each source for the selection algorithm.
@@ -374,6 +405,12 @@ impl Daemon {
 
                             // Send system offset to clock discipline task.
                             let _ = self.offset_tx.send(Some(result.system_offset));
+
+                            // Mark daemon as ready after first successful selection.
+                            if !ready.load(Ordering::Relaxed) {
+                                ready.store(true, Ordering::Relaxed);
+                                info!("Daemon ready: first successful source selection complete");
+                            }
 
                             // Record system offset metric.
                             if metrics_enabled {

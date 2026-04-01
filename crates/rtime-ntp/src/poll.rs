@@ -25,8 +25,8 @@ impl PollInterval {
 
     /// Create with custom min/max bounds.
     pub fn with_bounds(min: i8, max: i8) -> Self {
-        let min = min.max(4).min(17);
-        let max = max.max(min).min(17);
+        let min = min.clamp(4, 17);
+        let max = max.clamp(min, 17);
         Self {
             current: min,
             min,

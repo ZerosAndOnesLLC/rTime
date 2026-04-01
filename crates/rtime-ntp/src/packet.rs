@@ -112,7 +112,7 @@ impl NtpPacket {
         let version = (li_vn_mode >> 3) & 0x07;
         let mode = NtpMode::from_u8(li_vn_mode & 0x07);
 
-        if version < 1 || version > 4 {
+        if !(1..=4).contains(&version) {
             return Err(PacketError::UnsupportedVersion(version));
         }
 

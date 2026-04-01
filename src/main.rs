@@ -16,6 +16,7 @@ mod daemon;
 mod management;
 mod ntp_client;
 mod ntp_server;
+mod ptp_node;
 
 #[derive(Parser)]
 #[command(name = "rtime", version, about = "rTime - NTP/PTP time synchronization service")]

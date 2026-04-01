@@ -1,12 +1,12 @@
-/// PI servo clock discipline for NTP/PTP.
-///
-/// Implements a proportional-integral controller that adjusts system clock
-/// frequency to converge the measured offset to zero. The servo operates in
-/// three phases:
-///
-/// 1. **Init** -- discard the first few samples while filters warm up.
-/// 2. **FLL (Frequency-Lock Loop)** -- large gains for fast initial convergence.
-/// 3. **PLL (Phase-Lock Loop)** -- small gains for fine-grained tracking.
+//! PI servo clock discipline for NTP/PTP.
+//!
+//! Implements a proportional-integral controller that adjusts system clock
+//! frequency to converge the measured offset to zero. The servo operates in
+//! three phases:
+//!
+//!  1. **Init** -- discard the first few samples while filters warm up.
+//!  2. **FLL (Frequency-Lock Loop)** -- large gains for fast initial convergence.
+//!  3. **PLL (Phase-Lock Loop)** -- small gains for fine-grained tracking.
 
 /// Servo operating state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
