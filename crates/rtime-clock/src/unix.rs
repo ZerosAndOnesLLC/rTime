@@ -144,7 +144,7 @@ impl UnixClock {
         let freq = (ppm * 65536.0) as i64;
 
         let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-        tx.modes = MOD_FREQUENCY as i32;
+        tx.modes = MOD_FREQUENCY as u32;
         tx.freq = freq;
 
         let ret = unsafe { libc::ntp_adjtime(&mut tx) };
