@@ -32,9 +32,6 @@ const KEY_ID_SIZE: usize = 4;
 /// Current key identifier value.
 const CURRENT_KEY_ID: u32 = 1;
 
-/// Previous key identifier value (after rotation).
-const _PREVIOUS_KEY_ID: u32 = 0;
-
 /// Nonce size for cookie encryption.
 const COOKIE_NONCE_SIZE: usize = 16;
 

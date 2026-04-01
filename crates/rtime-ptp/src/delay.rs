@@ -18,7 +18,7 @@ fn ptp_diff(a: PtpTimestamp, b: PtpTimestamp) -> NtpDuration {
     let a_nanos = a.seconds as i128 * 1_000_000_000 + a.nanoseconds as i128;
     let b_nanos = b.seconds as i128 * 1_000_000_000 + b.nanoseconds as i128;
     let diff_nanos = a_nanos - b_nanos;
-    NtpDuration::from_nanos(diff_nanos as i64)
+    NtpDuration::from_nanos(diff_nanos.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
 }
 
 /// Compute clock offset and mean path delay from E2E delay mechanism timestamps.

@@ -79,6 +79,10 @@ pub struct NtpConfig {
     pub enabled: bool,
     #[serde(default = "default_ntp_listen")]
     pub listen: String,
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit: f64,
+    #[serde(default = "default_rate_burst")]
+    pub rate_burst: u32,
     #[serde(default)]
     pub nts: NtsConfig,
     #[serde(default)]
@@ -90,6 +94,8 @@ impl Default for NtpConfig {
         Self {
             enabled: true,
             listen: default_ntp_listen(),
+            rate_limit: default_rate_limit(),
+            rate_burst: default_rate_burst(),
             nts: NtsConfig::default(),
             sources: Vec::new(),
         }
@@ -98,6 +104,14 @@ impl Default for NtpConfig {
 
 fn default_ntp_listen() -> String {
     "0.0.0.0:123".into()
+}
+
+fn default_rate_limit() -> f64 {
+    16.0
+}
+
+fn default_rate_burst() -> u32 {
+    32
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -130,6 +144,18 @@ pub struct NtpSourceConfig {
     pub address: String,
     #[serde(default)]
     pub nts: bool,
+    #[serde(default = "default_min_poll")]
+    pub min_poll: i8,
+    #[serde(default = "default_max_poll")]
+    pub max_poll: i8,
+}
+
+fn default_min_poll() -> i8 {
+    4
+}
+
+fn default_max_poll() -> i8 {
+    10
 }
 
 #[derive(Debug, Clone, Deserialize)]

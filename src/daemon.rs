@@ -162,12 +162,18 @@ impl Daemon {
 
             info!("Spawning NTP client for source: {} ({})", source.address, addr);
 
-            let tx = self.measurement_tx.as_ref().expect("measurement_tx taken").clone();
+            let tx = self
+                .measurement_tx
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("measurement_tx already taken before spawning NTP client for {}", source.address))?
+                .clone();
             let shutdown = self.shutdown_rx.clone();
             let metrics_enabled = self.config.metrics.enabled;
+            let min_poll = source.min_poll;
+            let max_poll = source.max_poll;
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = ntp_client::run_ntp_client(addr, tx, shutdown, metrics_enabled).await {
+                if let Err(e) = ntp_client::run_ntp_client(addr, tx, shutdown, metrics_enabled, min_poll, max_poll).await {
                     error!("NTP client for {} exited with error: {}", addr, e);
                 }
             });
@@ -178,7 +184,11 @@ impl Daemon {
         // Spawn PTP client node task if enabled.
         let ptp_handle = if self.config.ptp.enabled {
             let ptp_config = Arc::new(self.config.ptp.clone());
-            let tx = self.measurement_tx.as_ref().expect("measurement_tx taken").clone();
+            let tx = self
+                .measurement_tx
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("measurement_tx already taken before spawning PTP node"))?
+                .clone();
             let shutdown = self.shutdown_rx.clone();
 
             let handle = tokio::spawn(async move {
@@ -214,8 +224,11 @@ impl Daemon {
             let shutdown = self.shutdown_rx.clone();
             let metrics_enabled = self.config.metrics.enabled;
 
+            let rate_limit = self.config.ntp.rate_limit;
+            let rate_burst = self.config.ntp.rate_burst;
+
             let handle = tokio::spawn(async move {
-                if let Err(e) = ntp_server::run_ntp_server(listen_addr, state, shutdown, metrics_enabled).await {
+                if let Err(e) = ntp_server::run_ntp_server(listen_addr, state, shutdown, metrics_enabled, rate_limit, rate_burst).await {
                     error!("NTP server exited with error: {}", e);
                 }
             });

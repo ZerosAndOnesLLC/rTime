@@ -93,12 +93,6 @@ fn build_kod_rate_response(request: &NtpPacket, receive_ts: NtpTimestamp) -> Ntp
 
 // ─── NTP server ────────────────────────────────────────────────────────────
 
-/// Default maximum request rate per IP (requests per second).
-const DEFAULT_RATE_LIMIT: f64 = 16.0;
-
-/// Default burst size (max tokens accumulated).
-const DEFAULT_BURST: u32 = 32;
-
 /// How often to purge stale rate-limiter buckets (seconds).
 const CLEANUP_INTERVAL_SECS: u64 = 300;
 
@@ -114,21 +108,26 @@ const BUCKET_MAX_AGE_SECS: u64 = 600;
 /// Includes per-IP rate limiting: clients that exceed the configured rate
 /// receive a KoD (Kiss-o'-Death) response with code "RATE".
 ///
+/// `rate_limit` is the maximum requests per second per IP. `rate_burst` is
+/// the token bucket burst size (max tokens accumulated).
+///
 /// Logs errors on bad packets but does not crash -- resilient to malformed input.
 pub async fn run_ntp_server(
     listen_addr: SocketAddr,
     server_state: Arc<RwLock<ServerState>>,
     mut shutdown: watch::Receiver<bool>,
     metrics_enabled: bool,
+    rate_limit: f64,
+    rate_burst: u32,
 ) -> Result<()> {
     let socket = UdpSocket::bind(listen_addr)
         .await
         .context(format!("failed to bind NTP server socket on {}", listen_addr))?;
 
-    info!("NTP server listening on {}", listen_addr);
+    info!("NTP server listening on {} (rate_limit={}/s, burst={})", listen_addr, rate_limit, rate_burst);
 
     let mut buf = [0u8; 512];
-    let mut rate_limiter = RateLimiter::new(DEFAULT_RATE_LIMIT, DEFAULT_BURST);
+    let mut rate_limiter = RateLimiter::new(rate_limit, rate_burst);
     let mut cleanup_interval =
         tokio::time::interval(tokio::time::Duration::from_secs(CLEANUP_INTERVAL_SECS));
     // The first tick completes immediately -- consume it.

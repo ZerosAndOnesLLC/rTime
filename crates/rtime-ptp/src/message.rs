@@ -17,6 +17,8 @@ pub enum PtpParseError {
     UnknownMessageType(u8),
     #[error("unsupported PTP version: {0}")]
     UnsupportedVersion(u8),
+    #[error("invalid slice length for array conversion: {0}")]
+    InvalidSliceLength(#[from] std::array::TryFromSliceError),
 }
 
 /// PTP message type nibble values (IEEE 1588-2019 Table 36).
@@ -204,8 +206,6 @@ impl PtpHeader {
 
     /// Serialize the header into 34 bytes.
     pub fn serialize(&self, buf: &mut [u8]) {
-        assert!(buf.len() >= PTP_HEADER_SIZE);
-
         buf[0] = (self.transport_specific << 4) | (self.message_type as u8);
         buf[1] = self.version & 0x0F;
         buf[2..4].copy_from_slice(&self.message_length.to_be_bytes());
@@ -307,7 +307,7 @@ impl AnnounceBody {
             });
         }
         let origin_timestamp = PtpTimestamp::from_bytes(
-            <[u8; 10]>::try_from(&data[0..10]).unwrap(),
+            <[u8; 10]>::try_from(&data[0..10])?,
         );
         let current_utc_offset = i16::from_be_bytes([data[10], data[11]]);
         // data[12] is reserved
@@ -332,7 +332,6 @@ impl AnnounceBody {
     }
 
     pub fn serialize(&self, buf: &mut [u8]) {
-        assert!(buf.len() >= Self::SIZE);
         let ts_bytes = self.origin_timestamp.to_bytes();
         buf[0..10].copy_from_slice(&ts_bytes);
         buf[10..12].copy_from_slice(&self.current_utc_offset.to_be_bytes());
@@ -393,7 +392,7 @@ impl PtpMessage {
                     });
                 }
                 let origin_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10]).unwrap(),
+                    <[u8; 10]>::try_from(&body[0..10])?,
                 );
                 Ok(Self::Sync {
                     header,
@@ -408,7 +407,7 @@ impl PtpMessage {
                     });
                 }
                 let precise_origin_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10]).unwrap(),
+                    <[u8; 10]>::try_from(&body[0..10])?,
                 );
                 Ok(Self::FollowUp {
                     header,
@@ -423,7 +422,7 @@ impl PtpMessage {
                     });
                 }
                 let origin_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10]).unwrap(),
+                    <[u8; 10]>::try_from(&body[0..10])?,
                 );
                 Ok(Self::DelayReq {
                     header,
@@ -438,7 +437,7 @@ impl PtpMessage {
                     });
                 }
                 let receive_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10]).unwrap(),
+                    <[u8; 10]>::try_from(&body[0..10])?,
                 );
                 let requesting_port = PortIdentity::parse(&body[10..20])?;
                 Ok(Self::DelayResp {

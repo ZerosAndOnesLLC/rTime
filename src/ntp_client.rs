@@ -17,9 +17,6 @@ const INITIAL_BURST_COUNT: u32 = 4;
 /// Interval between initial burst queries (seconds).
 const INITIAL_BURST_INTERVAL_SECS: u64 = 8;
 
-/// Normal polling interval (seconds). Will be adaptive in Phase 3.
-const NORMAL_POLL_INTERVAL_SECS: u64 = 64;
-
 /// Socket read timeout (seconds).
 const RECV_TIMEOUT_SECS: u64 = 5;
 
@@ -27,7 +24,12 @@ const RECV_TIMEOUT_SECS: u64 = 5;
 /// and sends measurements on the provided channel.
 ///
 /// The task performs an initial burst of fast queries to quickly establish
-/// a baseline, then switches to normal polling interval.
+/// a baseline, then switches to normal polling interval based on `min_poll`
+/// (the minimum polling interval as log2 seconds, e.g. 4 = 16s) and
+/// `max_poll` (the maximum polling interval as log2 seconds, e.g. 10 = 1024s).
+///
+/// Currently uses `min_poll` as the normal interval. Adaptive polling between
+/// min and max will be implemented in a future phase.
 ///
 /// Respects the shutdown signal and exits cleanly when triggered.
 pub async fn run_ntp_client(
@@ -35,12 +37,25 @@ pub async fn run_ntp_client(
     measurement_tx: mpsc::Sender<SourceMeasurement>,
     mut shutdown: watch::Receiver<bool>,
     metrics_enabled: bool,
+    min_poll: i8,
+    max_poll: i8,
 ) -> Result<()> {
+    // Clamp poll values to sane range (2^1 = 2s .. 2^17 = 131072s).
+    let min_poll = min_poll.clamp(1, 17);
+    let max_poll = max_poll.clamp(min_poll, 17);
+
+    // Use min_poll as the normal interval for now. Adaptive polling between
+    // min_poll and max_poll will be implemented in a future phase.
+    let normal_poll_secs: u64 = 1u64 << (min_poll as u32);
+
     let socket = UdpSocket::bind("0.0.0.0:0")
         .await
         .context("failed to bind NTP client UDP socket")?;
 
-    info!("NTP client started for {}", server_addr);
+    info!(
+        "NTP client started for {} (poll interval: {}s-{}s)",
+        server_addr, 1u64 << (min_poll as u32), 1u64 << (max_poll as u32),
+    );
 
     let mut query_count: u64 = 0;
     let mut jitter_samples: Vec<f64> = Vec::new();
@@ -52,7 +67,7 @@ pub async fn run_ntp_client(
         let interval_secs = if query_count < INITIAL_BURST_COUNT as u64 {
             INITIAL_BURST_INTERVAL_SECS
         } else {
-            NORMAL_POLL_INTERVAL_SECS
+            normal_poll_secs
         };
 
         // Perform a single NTP query.
