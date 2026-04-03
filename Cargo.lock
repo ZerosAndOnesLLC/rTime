@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "rtime"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-clock"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "libc",
  "rtime-core",
@@ -1047,15 +1047,16 @@ dependencies = [
 
 [[package]]
 name = "rtime-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
 name = "rtime-metrics"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "axum",
  "metrics",
@@ -1067,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-net"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "libc",
  "rtime-core",
@@ -1077,7 +1078,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-ntp"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rand",
  "rtime-core",
@@ -1086,22 +1087,23 @@ dependencies = [
 
 [[package]]
 name = "rtime-nts"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "aes-siv",
  "rand",
  "rtime-core",
  "rustls",
- "rustls-pemfile",
+ "rustls-pki-types",
  "sha2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
 name = "rtime-ptp"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "rtime-core",
  "thiserror 2.0.18",
@@ -1109,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-refclock"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "libc",
  "rtime-core",
@@ -1143,15 +1145,6 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
@@ -1901,6 +1894,20 @@ name = "zeroize"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85a5b4158499876c763cb03bc4e49185d3cccbabb15b33c627f7884f43db852e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "zmij"

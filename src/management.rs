@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
@@ -63,11 +66,44 @@ impl DaemonStatus {
     }
 }
 
-pub fn management_router(status: Arc<RwLock<DaemonStatus>>) -> Router {
-    Router::new()
+pub fn management_router(status: Arc<RwLock<DaemonStatus>>, api_key: Option<String>) -> Router {
+    let router = Router::new()
         .route("/api/v1/status", get(get_status))
         .route("/api/v1/sources", get(get_sources))
-        .with_state(status)
+        .with_state(status);
+
+    if let Some(key) = api_key {
+        let key = Arc::new(key);
+        router.layer(middleware::from_fn(move |req, next| {
+            let key = Arc::clone(&key);
+            auth_middleware(req, next, key)
+        }))
+    } else {
+        router
+    }
+}
+
+async fn auth_middleware(
+    req: Request,
+    next: Next,
+    api_key: Arc<String>,
+) -> Result<Response, StatusCode> {
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
+
+    match auth_header {
+        Some(header) if header.starts_with("Bearer ") => {
+            let token = &header[7..];
+            if token == api_key.as_str() {
+                Ok(next.run(req).await)
+            } else {
+                Err(StatusCode::UNAUTHORIZED)
+            }
+        }
+        _ => Err(StatusCode::UNAUTHORIZED),
+    }
 }
 
 async fn get_status(

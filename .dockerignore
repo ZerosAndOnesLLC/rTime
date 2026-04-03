@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+target
+*.md
+deploy
+tests
+.dockerignore
+Dockerfile
+.cargo
+.claude

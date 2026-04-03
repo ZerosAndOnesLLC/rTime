@@ -8,6 +8,8 @@
 //! "EXPORTER-network-time-security" and a two-byte context of 0x0000
 //! (for NTPv4 protocol negotiation).
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use crate::records::{NtsKeRecord, RecordType};
 use crate::{
     AEAD_AES_SIV_CMAC_256, AEAD_AES_SIV_CMAC_256_KEYLEN, NTS_NEXT_PROTOCOL_NTPV4,
@@ -15,7 +17,7 @@ use crate::{
 };
 
 /// Result of a successful NTS-KE handshake.
-#[derive(Debug, Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct NtsKeResult {
     /// Client-to-server AEAD key derived from TLS exporter.
     pub c2s_key: Vec<u8>,
@@ -29,6 +31,19 @@ pub struct NtsKeResult {
     pub server: Option<String>,
     /// Optional NTP port from port negotiation record.
     pub port: Option<u16>,
+}
+
+impl std::fmt::Debug for NtsKeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NtsKeResult")
+            .field("c2s_key", &"[REDACTED]")
+            .field("s2c_key", &"[REDACTED]")
+            .field("cookies", &format!("[{} cookies]", self.cookies.len()))
+            .field("aead_algorithm", &self.aead_algorithm)
+            .field("server", &self.server)
+            .field("port", &self.port)
+            .finish()
+    }
 }
 
 /// Derive AEAD keys from a TLS 1.3 connection using the exporter interface.
@@ -61,6 +76,9 @@ pub fn derive_keys(
 
     let c2s_key = output[..key_length].to_vec();
     let s2c_key = output[key_length..].to_vec();
+
+    // Zeroize the raw exporter output buffer
+    output.zeroize();
 
     Ok((c2s_key, s2c_key))
 }
@@ -400,7 +418,7 @@ mod tests {
 
     #[test]
     fn generate_cookies_count() {
-        let jar = crate::cookie::CookieJar::new(random_key());
+        let mut jar = crate::cookie::CookieJar::new(random_key());
         let c2s = random_key();
         let s2c = random_key();
 
@@ -498,7 +516,7 @@ mod tests {
         let (c2s_key, s2c_key) = derive_keys(&exporter, algorithm).unwrap();
 
         // 5. Server generates cookies and builds response
-        let jar = crate::cookie::CookieJar::new(random_key());
+        let mut jar = crate::cookie::CookieJar::new(random_key());
         let cookies = generate_cookies(&jar, &c2s_key, &s2c_key, algorithm, DEFAULT_COOKIE_COUNT);
         let server_response = build_server_response(algorithm, &cookies, None, None);
 

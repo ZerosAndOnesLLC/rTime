@@ -8,6 +8,7 @@
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::{Aead, KeyInit, Payload};
 use aes_siv::Aes128SivAead;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{AEAD_AES_SIV_CMAC_256_KEYLEN, NtsError};
 
@@ -18,6 +19,7 @@ pub const SIV_TAG_SIZE: usize = 16;
 ///
 /// Maintains separate keys for client-to-server (C2S) and server-to-client (S2C)
 /// directions as specified by RFC 8915.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct NtsAead {
     c2s_key: [u8; AEAD_AES_SIV_CMAC_256_KEYLEN],
     s2c_key: [u8; AEAD_AES_SIV_CMAC_256_KEYLEN],

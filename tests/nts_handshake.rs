@@ -74,7 +74,7 @@ fn full_nts_ke_handshake() {
 
     // 5. Server generates cookies and builds response.
     let master_key = random_key();
-    let jar = CookieJar::new(master_key);
+    let mut jar = CookieJar::new(master_key);
     let cookies = generate_cookies(&jar, &c2s_key, &s2c_key, algorithm, DEFAULT_COOKIE_COUNT);
     assert_eq!(cookies.len(), DEFAULT_COOKIE_COUNT);
 
@@ -225,7 +225,7 @@ fn nts_ke_records_roundtrip() {
 
 #[test]
 fn tampered_cookie_is_rejected() {
-    let jar = CookieJar::new(random_key());
+    let mut jar = CookieJar::new(random_key());
     let c2s = random_key();
     let s2c = random_key();
 
@@ -242,7 +242,7 @@ fn tampered_cookie_is_rejected() {
 #[test]
 fn wrong_master_key_rejects_cookie() {
     let jar1 = CookieJar::new(random_key());
-    let jar2 = CookieJar::new(random_key());
+    let mut jar2 = CookieJar::new(random_key());
 
     let cookie = jar1.make_cookie(&random_key(), &random_key(), AEAD_AES_SIV_CMAC_256);
 

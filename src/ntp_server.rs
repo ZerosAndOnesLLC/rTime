@@ -22,6 +22,10 @@ struct TokenBucket {
     last_update: Instant,
 }
 
+/// Maximum number of tracked IPs in the rate limiter to prevent OOM from
+/// spoofed source IPs (UDP source addresses are trivially spoofable).
+const MAX_RATE_LIMITER_BUCKETS: usize = 100_000;
+
 /// Simple per-IP rate limiter using the token bucket algorithm.
 struct RateLimiter {
     buckets: HashMap<IpAddr, TokenBucket>,
@@ -44,6 +48,12 @@ impl RateLimiter {
         let now = Instant::now();
         let burst = self.burst as f64;
         let max_rate = self.max_rate;
+
+        // Prevent unbounded growth from spoofed source IPs.
+        // If we've hit the cap and this is a new IP, rate-limit it.
+        if self.buckets.len() >= MAX_RATE_LIMITER_BUCKETS && !self.buckets.contains_key(&ip) {
+            return false;
+        }
 
         let bucket = self.buckets.entry(ip).or_insert_with(|| TokenBucket {
             tokens: burst,

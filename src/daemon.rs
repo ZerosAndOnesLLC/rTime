@@ -133,7 +133,8 @@ impl Daemon {
                 ))?;
 
             let status = Arc::clone(&self.daemon_status);
-            let router = management::management_router(status);
+            let api_key = self.config.management.api_key.clone();
+            let router = management::management_router(status, api_key);
             let listener = tokio::net::TcpListener::bind(mgmt_addr)
                 .await
                 .context(format!("failed to bind management API on {}", mgmt_addr))?;

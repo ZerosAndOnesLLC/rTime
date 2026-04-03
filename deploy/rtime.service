@@ -9,13 +9,30 @@ ExecStart=/usr/bin/rtime --config /etc/rtime/rtime.toml
 Restart=on-failure
 RestartSec=5
 
+# Run as unprivileged user with only required capabilities
+DynamicUser=yes
+StateDirectory=rtime
+
+# Capabilities
+AmbientCapabilities=CAP_SYS_TIME CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_SYS_TIME CAP_NET_BIND_SERVICE
+
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service @clock
 ReadWritePaths=/var/lib/rtime
-AmbientCapabilities=CAP_SYS_TIME CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target

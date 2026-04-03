@@ -10,9 +10,10 @@ description = "Network Time Security (NTS) for rTime"
 rtime-core = { workspace = true }
 thiserror = { workspace = true }
 rustls = { workspace = true }
-rustls-pemfile = { workspace = true }
+rustls-pki-types = "1"
 aes-siv = "0.7"
 rand = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+zeroize = { version = "1", features = ["derive"] }

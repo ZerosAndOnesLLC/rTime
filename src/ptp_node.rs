@@ -33,6 +33,9 @@ const PTP_MAX_PACKET_SIZE: usize = 1500;
 /// Number of jitter samples to keep for RMS calculation.
 const JITTER_WINDOW: usize = 8;
 
+/// Maximum PTP packets processed per second (rate limit).
+const PTP_MAX_PACKETS_PER_SEC: u64 = 200;
+
 /// Default announce interval for the foreign master table (2^1 = 2 seconds).
 const DEFAULT_ANNOUNCE_INTERVAL_SECS: f64 = 2.0;
 
@@ -171,12 +174,27 @@ pub async fn run_ptp_node(
     let mut event_buf = [0u8; PTP_MAX_PACKET_SIZE];
     let mut general_buf = [0u8; PTP_MAX_PACKET_SIZE];
 
+    // Rate limiting for incoming PTP packets.
+    let mut ptp_packet_count: u64 = 0;
+    let mut ptp_rate_limit_reset = Instant::now();
+
     loop {
         tokio::select! {
             // Receive on event socket (Sync, DelayResp).
             result = event_socket.recv_from(&mut event_buf) => {
                 match result {
                     Ok((len, from)) => {
+                        // Rate limit incoming packets.
+                        let now_rl = Instant::now();
+                        if now_rl.duration_since(ptp_rate_limit_reset) >= Duration::from_secs(1) {
+                            ptp_packet_count = 0;
+                            ptp_rate_limit_reset = now_rl;
+                        }
+                        ptp_packet_count += 1;
+                        if ptp_packet_count > PTP_MAX_PACKETS_PER_SEC {
+                            continue;
+                        }
+
                         let recv_time = current_ptp_timestamp();
                         if let Err(e) = handle_event_message(
                             &event_buf[..len],
@@ -205,6 +223,17 @@ pub async fn run_ptp_node(
             result = general_socket.recv_from(&mut general_buf) => {
                 match result {
                     Ok((len, from)) => {
+                        // Share rate limit counter with event socket.
+                        let now_rl = Instant::now();
+                        if now_rl.duration_since(ptp_rate_limit_reset) >= Duration::from_secs(1) {
+                            ptp_packet_count = 0;
+                            ptp_rate_limit_reset = now_rl;
+                        }
+                        ptp_packet_count += 1;
+                        if ptp_packet_count > PTP_MAX_PACKETS_PER_SEC {
+                            continue;
+                        }
+
                         if let Err(e) = handle_general_message(
                             &general_buf[..len],
                             from,

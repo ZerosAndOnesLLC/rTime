@@ -9,3 +9,4 @@ description = "Core types, traits, and algorithms for rTime"
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
+tracing = { workspace = true }

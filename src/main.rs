@@ -141,6 +141,7 @@ async fn main() -> Result<()> {
     } else {
         // Daemon mode: load config and run the full daemon.
         let mut config = load_config(&cli.config)?;
+        config.validate().context("configuration validation failed")?;
 
         if cli.no_discipline {
             config.clock.discipline = false;

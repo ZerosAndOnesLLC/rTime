@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 mod linux_phc {
     use std::ffi::CString;
+    use std::sync::Mutex;
 
     use rtime_core::clock::{Clock, ClockError};
     use rtime_core::timestamp::{NtpDuration, NtpTimestamp, PtpTimestamp};
@@ -23,10 +24,16 @@ mod linux_phc {
     /// This provides direct access to the NIC's hardware clock through the Linux
     /// PTP subsystem. The PHC can be read with nanosecond precision and disciplined
     /// independently of the system clock.
+    ///
+    /// The internal Mutex ensures that read-modify-write operations like `step()`
+    /// are atomic with respect to concurrent callers.
     pub struct PhcClock {
         fd: libc::c_int,
         clockid: libc::clockid_t,
         device_path: String,
+        /// Guards clock mutation operations (step, adjust_frequency) to prevent
+        /// TOCTOU races from concurrent calls via &self.
+        discipline_lock: Mutex<()>,
     }
 
     impl std::fmt::Debug for PhcClock {
@@ -39,8 +46,8 @@ mod linux_phc {
         }
     }
 
-    // SAFETY: The file descriptor is owned and only accessed through &self methods
-    // that perform atomic kernel operations.
+    // SAFETY: The file descriptor is owned and mutation operations are
+    // serialized through the discipline_lock Mutex.
     unsafe impl Send for PhcClock {}
     unsafe impl Sync for PhcClock {}
 
@@ -68,6 +75,7 @@ mod linux_phc {
                 fd,
                 clockid,
                 device_path: device.to_string(),
+                discipline_lock: Mutex::new(()),
             })
         }
 
@@ -126,6 +134,14 @@ mod linux_phc {
         }
 
         fn step(&self, offset: NtpDuration) -> Result<(), ClockError> {
+            // Hold lock to prevent TOCTOU race in read-modify-write.
+            let _guard = self.discipline_lock.lock().map_err(|_| {
+                ClockError::Os(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "discipline lock poisoned",
+                ))
+            })?;
+
             // Read current time, apply offset, and set.
             let mut ts = libc::timespec {
                 tv_sec: 0,
@@ -163,6 +179,13 @@ mod linux_phc {
         }
 
         fn adjust_frequency(&self, ppm: f64) -> Result<(), ClockError> {
+            let _guard = self.discipline_lock.lock().map_err(|_| {
+                ClockError::Os(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "discipline lock poisoned",
+                ))
+            })?;
+
             // Use clock_adjtime to adjust the PHC frequency.
             let freq = (ppm * 65536.0) as i64;
 

@@ -233,6 +233,10 @@ pub struct ManagementConfig {
     pub enabled: bool,
     #[serde(default = "default_management_listen")]
     pub listen: String,
+    /// Optional bearer token for API authentication.
+    /// If set, all management API requests must include
+    /// `Authorization: Bearer <token>` header.
+    pub api_key: Option<String>,
 }
 
 impl Default for ManagementConfig {
@@ -240,10 +244,119 @@ impl Default for ManagementConfig {
         Self {
             enabled: true,
             listen: default_management_listen(),
+            api_key: None,
         }
     }
 }
 
 fn default_management_listen() -> String {
     "127.0.0.1:9200".into()
+}
+
+impl RtimeConfig {
+    /// Validate configuration values after deserialization.
+    /// Returns an error describing the first invalid value found.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Clock thresholds must be positive and finite
+        if !self.clock.step_threshold_ms.is_finite() || self.clock.step_threshold_ms <= 0.0 {
+            return Err(ConfigError::InvalidValue(
+                "clock.step_threshold_ms must be a positive finite number".into(),
+            ));
+        }
+        if !self.clock.panic_threshold_ms.is_finite() || self.clock.panic_threshold_ms <= 0.0 {
+            return Err(ConfigError::InvalidValue(
+                "clock.panic_threshold_ms must be a positive finite number".into(),
+            ));
+        }
+
+        // Rate limiting values
+        if !self.ntp.rate_limit.is_finite() || self.ntp.rate_limit <= 0.0 {
+            return Err(ConfigError::InvalidValue(
+                "ntp.rate_limit must be a positive finite number".into(),
+            ));
+        }
+        if self.ntp.rate_burst == 0 {
+            return Err(ConfigError::InvalidValue(
+                "ntp.rate_burst must be greater than 0".into(),
+            ));
+        }
+
+        // Validate poll intervals for each source
+        for (i, source) in self.ntp.sources.iter().enumerate() {
+            if source.min_poll < 0 || source.min_poll > 17 {
+                return Err(ConfigError::InvalidValue(
+                    format!("ntp.sources[{}].min_poll must be between 0 and 17", i),
+                ));
+            }
+            if source.max_poll < 0 || source.max_poll > 17 {
+                return Err(ConfigError::InvalidValue(
+                    format!("ntp.sources[{}].max_poll must be between 0 and 17", i),
+                ));
+            }
+            if source.min_poll > source.max_poll {
+                return Err(ConfigError::InvalidValue(
+                    format!("ntp.sources[{}].min_poll must be <= max_poll", i),
+                ));
+            }
+        }
+
+        // Validate listen addresses are parseable
+        self.ntp.listen.parse::<std::net::SocketAddr>().map_err(|_| {
+            ConfigError::InvalidValue(format!("invalid ntp.listen address: {}", self.ntp.listen))
+        })?;
+        if self.metrics.enabled {
+            self.metrics.listen.parse::<std::net::SocketAddr>().map_err(|_| {
+                ConfigError::InvalidValue(format!(
+                    "invalid metrics.listen address: {}",
+                    self.metrics.listen
+                ))
+            })?;
+        }
+        if self.management.enabled {
+            self.management.listen.parse::<std::net::SocketAddr>().map_err(|_| {
+                ConfigError::InvalidValue(format!(
+                    "invalid management.listen address: {}",
+                    self.management.listen
+                ))
+            })?;
+        }
+        if self.ntp.nts.enabled {
+            self.ntp.nts.ke_listen.parse::<std::net::SocketAddr>().map_err(|_| {
+                ConfigError::InvalidValue(format!(
+                    "invalid nts.ke_listen address: {}",
+                    self.ntp.nts.ke_listen
+                ))
+            })?;
+        }
+
+        // Warn-level checks: non-loopback management/metrics
+        let mgmt_addr: std::net::SocketAddr = self.management.listen.parse().unwrap_or_else(|_| {
+            "127.0.0.1:9200".parse().unwrap()
+        });
+        if self.management.enabled && !mgmt_addr.ip().is_loopback() {
+            tracing::warn!(
+                "Management API listen address {} is non-loopback and has no authentication",
+                self.management.listen
+            );
+        }
+
+        let metrics_addr: std::net::SocketAddr = self.metrics.listen.parse().unwrap_or_else(|_| {
+            "127.0.0.1:9100".parse().unwrap()
+        });
+        if self.metrics.enabled && !metrics_addr.ip().is_loopback() {
+            tracing::warn!(
+                "Metrics endpoint listen address {} is non-loopback and has no authentication",
+                self.metrics.listen
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Configuration validation errors.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("invalid config value: {0}")]
+    InvalidValue(String),
 }

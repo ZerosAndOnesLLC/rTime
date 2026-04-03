@@ -381,6 +381,16 @@ impl PtpMessage {
     /// Parse a complete PTP message from wire bytes.
     pub fn parse(data: &[u8]) -> Result<Self, PtpParseError> {
         let (header, hdr_len) = PtpHeader::parse(data)?;
+
+        // Validate message_length against actual data.
+        let declared_len = header.message_length as usize;
+        if declared_len > 0 && data.len() < declared_len {
+            return Err(PtpParseError::BufferTooShort {
+                need: declared_len,
+                got: data.len(),
+            });
+        }
+
         let body = &data[hdr_len..];
 
         match header.message_type {

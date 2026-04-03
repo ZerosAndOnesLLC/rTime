@@ -22,6 +22,10 @@ pub const EXT_HEADER_SIZE: usize = 4;
 /// when used with NTPv4, but for parsing we accept the header minimum).
 pub const EXT_MIN_SIZE: usize = 4;
 
+/// Maximum number of extension fields allowed per packet to prevent
+/// memory amplification from crafted packets.
+const MAX_EXTENSION_FIELDS: usize = 32;
+
 // NTS extension field types (RFC 8915 Section 5.6).
 
 /// Unique Identifier extension field. Contains a random nonce to prevent
@@ -147,6 +151,9 @@ impl ExtensionField {
     }
 
     /// Parse all extension fields from the given data.
+    ///
+    /// Limited to [`MAX_EXTENSION_FIELDS`] fields to prevent memory
+    /// amplification from crafted packets.
     pub fn parse_all(data: &[u8]) -> Result<Vec<Self>, ExtensionError> {
         let mut fields = Vec::new();
         let mut offset = 0;
@@ -154,6 +161,10 @@ impl ExtensionField {
         while offset < data.len() {
             // Need at least the header to continue
             if data.len() - offset < EXT_HEADER_SIZE {
+                break;
+            }
+
+            if fields.len() >= MAX_EXTENSION_FIELDS {
                 break;
             }
 
