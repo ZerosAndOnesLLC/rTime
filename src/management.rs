@@ -7,6 +7,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
+use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
 #[derive(Serialize)]
@@ -95,8 +96,12 @@ async fn auth_middleware(
 
     match auth_header {
         Some(header) if header.starts_with("Bearer ") => {
-            let token = &header[7..];
-            if token == api_key.as_str() {
+            let token = header[7..].as_bytes();
+            let expected = api_key.as_bytes();
+            // Constant-time comparison to prevent timing side-channel attacks.
+            // We first check length equality (which leaks length but not content),
+            // then compare bytes in constant time.
+            if token.len() == expected.len() && token.ct_eq(expected).into() {
                 Ok(next.run(req).await)
             } else {
                 Err(StatusCode::UNAUTHORIZED)
