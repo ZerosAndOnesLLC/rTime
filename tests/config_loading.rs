@@ -16,7 +16,7 @@ fn minimal_config() {
     assert!(config.clock.discipline);
     assert_eq!(config.clock.step_threshold_ms, 128.0);
     assert!(config.ntp.enabled);
-    assert_eq!(config.ntp.listen, "0.0.0.0:123");
+    assert_eq!(config.ntp.listen, "127.0.0.1:123");
     assert!(config.ntp.sources.is_empty());
     assert!(!config.ptp.enabled);
     assert!(config.metrics.enabled);
@@ -132,9 +132,9 @@ fn defaults_for_missing_sections() {
     assert_eq!(config.clock.panic_threshold_ms, 1000.0);
     assert_eq!(config.clock.interface, "system");
     assert!(config.ntp.enabled);
-    assert_eq!(config.ntp.listen, "0.0.0.0:123");
+    assert_eq!(config.ntp.listen, "127.0.0.1:123");
     assert!(!config.ntp.nts.enabled);
-    assert_eq!(config.ntp.nts.ke_listen, "0.0.0.0:4460");
+    assert_eq!(config.ntp.nts.ke_listen, "127.0.0.1:4460");
     assert!(config.ntp.nts.certificate.is_none());
     assert!(config.ntp.nts.private_key.is_none());
     assert!(config.ntp.sources.is_empty());
@@ -198,5 +198,5 @@ fn partial_sections() {
     assert_eq!(config.clock.interface, "system"); // default
 
     assert!(!config.ntp.enabled);
-    assert_eq!(config.ntp.listen, "0.0.0.0:123"); // default
+    assert_eq!(config.ntp.listen, "127.0.0.1:123"); // default
 }

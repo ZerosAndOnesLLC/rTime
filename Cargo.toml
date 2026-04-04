@@ -13,13 +13,16 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 license = "MIT"
 authors = ["Zeros And Ones LLC"]
 repository = "https://github.com/ZerosAndOnesLLC/rTime"
 
 [workspace.dependencies]
+# Constant-time comparison
+subtle = "2"
+
 # Internal crates
 rtime-core = { path = "crates/rtime-core" }
 rtime-ntp = { path = "crates/rtime-ntp" }
@@ -87,6 +90,7 @@ toml = { workspace = true }
 serde = { workspace = true }
 axum = { workspace = true }
 rand = { workspace = true }
+subtle = { workspace = true }
 
 [features]
 default = ["ntp", "ptp", "nts", "clock-discipline", "metrics"]

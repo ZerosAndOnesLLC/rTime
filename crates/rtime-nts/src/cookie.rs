@@ -14,17 +14,20 @@
 //!
 //! The encrypted data contains:
 //! ```text
-//! +----------+----------+-----------+
-//! | algo(2B) | c2s_key  | s2c_key   |
-//! +----------+----------+-----------+
+//! +----------+------------+----------+-----------+
+//! | algo(2B) | created(8B)| c2s_key  | s2c_key   |
+//! +----------+------------+----------+-----------+
 //! ```
 
+use std::collections::VecDeque;
 use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::{Aead, KeyInit, Payload};
 use aes_siv::Aes128SivAead;
 use rand::RngCore;
+use sha2::{Sha256, Digest};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{AEAD_AES_SIV_CMAC_256_KEYLEN, NtsError};
@@ -32,11 +35,23 @@ use crate::{AEAD_AES_SIV_CMAC_256_KEYLEN, NtsError};
 /// Size of the key identifier in cookies.
 const KEY_ID_SIZE: usize = 4;
 
-/// Current key identifier value.
-const CURRENT_KEY_ID: u32 = 1;
-
 /// Nonce size for cookie encryption.
 const COOKIE_NONCE_SIZE: usize = 16;
+
+/// Default cookie time-to-live: 24 hours in seconds.
+const DEFAULT_COOKIE_TTL_SECS: u64 = 86400;
+
+/// Maximum number of used nonces to track for replay protection.
+const MAX_USED_NONCES: usize = 100_000;
+
+/// Number of oldest nonces to evict when the set is full.
+const NONCE_EVICT_COUNT: usize = 10_000;
+
+/// Derive a 4-byte key identifier from a master key using SHA-256.
+fn derive_key_id(key: &[u8; AEAD_AES_SIV_CMAC_256_KEYLEN]) -> u32 {
+    let hash = Sha256::digest(key);
+    u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]])
+}
 
 /// Result of decrypting a cookie.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
@@ -59,21 +74,26 @@ impl std::fmt::Debug for CookieContents {
     }
 }
 
-/// Maximum number of used nonces to track for replay protection.
-const MAX_USED_NONCES: usize = 100_000;
-
 /// Server-side cookie management.
 ///
-/// Cookies contain encrypted (c2s_key, s2c_key, aead_algorithm) using a server
-/// master key. The `CookieJar` supports key rotation by keeping track of
-/// both the current and previous master key.
+/// Cookies contain encrypted (c2s_key, s2c_key, aead_algorithm, timestamp)
+/// using a server master key. The `CookieJar` supports key rotation by keeping
+/// track of both the current and previous master key.
 ///
-/// Includes replay protection by tracking used cookie nonces (RFC 8915 Section 5.7).
+/// Includes replay protection by tracking used cookie nonces (RFC 8915 Section 5.7)
+/// with LRU-style eviction when the tracking set is full, and time-based cookie
+/// expiration to limit the replay window after server restarts.
 pub struct CookieJar {
     current_key: [u8; AEAD_AES_SIV_CMAC_256_KEYLEN],
+    current_key_id: u32,
     previous_key: Option<[u8; AEAD_AES_SIV_CMAC_256_KEYLEN]>,
+    previous_key_id: Option<u32>,
     /// Set of nonces from cookies that have already been consumed.
     used_nonces: HashSet<[u8; COOKIE_NONCE_SIZE]>,
+    /// Insertion-ordered queue for LRU eviction of used nonces.
+    nonce_order: VecDeque<[u8; COOKIE_NONCE_SIZE]>,
+    /// Maximum age of a cookie in seconds before it is rejected.
+    cookie_ttl_secs: u64,
 }
 
 impl Drop for CookieJar {
@@ -88,20 +108,38 @@ impl Drop for CookieJar {
 impl CookieJar {
     /// Create a new cookie jar with the given master key.
     pub fn new(master_key: [u8; AEAD_AES_SIV_CMAC_256_KEYLEN]) -> Self {
+        let key_id = derive_key_id(&master_key);
         Self {
             current_key: master_key,
+            current_key_id: key_id,
             previous_key: None,
+            previous_key_id: None,
             used_nonces: HashSet::new(),
+            nonce_order: VecDeque::new(),
+            cookie_ttl_secs: DEFAULT_COOKIE_TTL_SECS,
         }
+    }
+
+    /// Create a new cookie jar with a custom TTL (for testing).
+    pub fn with_ttl(master_key: [u8; AEAD_AES_SIV_CMAC_256_KEYLEN], ttl_secs: u64) -> Self {
+        let mut jar = Self::new(master_key);
+        jar.cookie_ttl_secs = ttl_secs;
+        jar
     }
 
     /// Generate a cookie encrypting the given session keys and algorithm.
     ///
     /// Returns an opaque cookie byte vector that can be sent to the client.
     pub fn make_cookie(&self, c2s_key: &[u8], s2c_key: &[u8], algorithm: u16) -> Vec<u8> {
-        // Build plaintext: algorithm (2 bytes) + c2s_key + s2c_key
-        let mut plaintext = Vec::with_capacity(2 + c2s_key.len() + s2c_key.len());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Build plaintext: algorithm (2B) + created_at (8B) + c2s_key + s2c_key
+        let mut plaintext = Vec::with_capacity(2 + 8 + c2s_key.len() + s2c_key.len());
         plaintext.extend_from_slice(&algorithm.to_be_bytes());
+        plaintext.extend_from_slice(&now.to_be_bytes());
         plaintext.extend_from_slice(c2s_key);
         plaintext.extend_from_slice(s2c_key);
 
@@ -125,7 +163,7 @@ impl CookieJar {
 
         // Build cookie: key_id (4 bytes) + nonce (16 bytes) + ciphertext
         let mut cookie = Vec::with_capacity(KEY_ID_SIZE + COOKIE_NONCE_SIZE + ciphertext.len());
-        cookie.extend_from_slice(&CURRENT_KEY_ID.to_be_bytes());
+        cookie.extend_from_slice(&self.current_key_id.to_be_bytes());
         cookie.extend_from_slice(&nonce);
         cookie.extend_from_slice(&ciphertext);
 
@@ -135,6 +173,7 @@ impl CookieJar {
     /// Validate and decrypt a cookie, returning the session keys and algorithm.
     ///
     /// Tracks used cookie nonces to prevent replay attacks (RFC 8915 Section 5.7).
+    /// Rejects cookies older than the configured TTL.
     pub fn open_cookie(&mut self, cookie: &[u8]) -> Result<CookieContents, NtsError> {
         let min_size = KEY_ID_SIZE + COOKIE_NONCE_SIZE;
         if cookie.len() < min_size {
@@ -145,7 +184,7 @@ impl CookieJar {
             )));
         }
 
-        let _key_id = u32::from_be_bytes([cookie[0], cookie[1], cookie[2], cookie[3]]);
+        let key_id = u32::from_be_bytes([cookie[0], cookie[1], cookie[2], cookie[3]]);
         let nonce = &cookie[KEY_ID_SIZE..KEY_ID_SIZE + COOKIE_NONCE_SIZE];
         let ciphertext = &cookie[KEY_ID_SIZE + COOKIE_NONCE_SIZE..];
 
@@ -157,38 +196,48 @@ impl CookieJar {
             return Err(NtsError::InvalidCookie("cookie replay detected".to_string()));
         }
 
-        // Try to decrypt with the current key first, then fall back to the
-        // previous key. After key rotation, existing cookies still carry the
-        // old key_id but need to be decrypted with what is now the previous key.
-        let plaintext = match decrypt_cookie_data(&self.current_key, nonce, ciphertext) {
-            Ok(pt) => pt,
-            Err(_) => {
-                if let Some(ref prev_key) = self.previous_key {
-                    decrypt_cookie_data(prev_key, nonce, ciphertext)?
-                } else {
-                    return Err(NtsError::InvalidCookie(
-                        "decryption failed with current key and no previous key".to_string(),
-                    ));
-                }
+        // Select decryption key based on key_id instead of blindly trying both.
+        let plaintext = if key_id == self.current_key_id {
+            decrypt_cookie_data(&self.current_key, nonce, ciphertext)?
+        } else if self.previous_key_id == Some(key_id) {
+            if let Some(ref prev_key) = self.previous_key {
+                decrypt_cookie_data(prev_key, nonce, ciphertext)?
+            } else {
+                return Err(NtsError::InvalidCookie(
+                    "key_id matches previous but no previous key available".to_string(),
+                ));
             }
+        } else {
+            return Err(NtsError::InvalidCookie(
+                format!("unknown key_id: {}", key_id),
+            ));
         };
 
-        // Mark this nonce as used to prevent replay.
-        // Evict oldest entries if we exceed the limit.
-        if self.used_nonces.len() >= MAX_USED_NONCES {
-            self.used_nonces.clear();
-        }
-        self.used_nonces.insert(nonce_array);
-
-        // Parse plaintext: algorithm (2 bytes) + c2s_key + s2c_key
-        if plaintext.len() < 2 {
+        // Parse plaintext: algorithm (2B) + created_at (8B) + c2s_key + s2c_key
+        if plaintext.len() < 10 {
             return Err(NtsError::InvalidCookie(
-                "decrypted cookie too short for algorithm".to_string(),
+                "decrypted cookie too short for header".to_string(),
             ));
         }
 
         let algorithm = u16::from_be_bytes([plaintext[0], plaintext[1]]);
-        let key_data = &plaintext[2..];
+        let created_at = u64::from_be_bytes([
+            plaintext[2], plaintext[3], plaintext[4], plaintext[5],
+            plaintext[6], plaintext[7], plaintext[8], plaintext[9],
+        ]);
+
+        // Time-based expiration: reject cookies older than TTL.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now.saturating_sub(created_at) >= self.cookie_ttl_secs {
+            return Err(NtsError::InvalidCookie(
+                "cookie has expired".to_string(),
+            ));
+        }
+
+        let key_data = &plaintext[10..];
 
         // Keys should be equal length (both are AEAD key length)
         if key_data.len() % 2 != 0 {
@@ -200,6 +249,19 @@ impl CookieJar {
         let c2s_key = key_data[..key_len].to_vec();
         let s2c_key = key_data[key_len..].to_vec();
 
+        // Mark this nonce as used to prevent replay.
+        // LRU eviction: remove oldest nonces when we hit the limit.
+        if self.used_nonces.len() >= MAX_USED_NONCES {
+            let to_evict = NONCE_EVICT_COUNT.min(self.nonce_order.len());
+            for _ in 0..to_evict {
+                if let Some(old_nonce) = self.nonce_order.pop_front() {
+                    self.used_nonces.remove(&old_nonce);
+                }
+            }
+        }
+        self.used_nonces.insert(nonce_array);
+        self.nonce_order.push_back(nonce_array);
+
         Ok(CookieContents {
             algorithm,
             c2s_key,
@@ -210,7 +272,9 @@ impl CookieJar {
     /// Rotate the master key. The current key becomes the previous key.
     pub fn rotate_key(&mut self, new_key: [u8; AEAD_AES_SIV_CMAC_256_KEYLEN]) {
         self.previous_key = Some(self.current_key);
+        self.previous_key_id = Some(self.current_key_id);
         self.current_key = new_key;
+        self.current_key_id = derive_key_id(&new_key);
     }
 
     /// Get a reference to the current master key.
@@ -378,5 +442,80 @@ mod tests {
             let contents = jar.open_cookie(&cookie).unwrap();
             assert_eq!(contents.algorithm, algo);
         }
+    }
+
+    #[test]
+    fn replay_detected() {
+        let mut jar = CookieJar::new(random_key());
+        let cookie = jar.make_cookie(&random_key(), &random_key(), 15);
+
+        // First open succeeds
+        assert!(jar.open_cookie(&cookie).is_ok());
+        // Second open with same cookie is a replay
+        let err = jar.open_cookie(&cookie).unwrap_err();
+        assert!(err.to_string().contains("replay"));
+    }
+
+    #[test]
+    fn expired_cookie_rejected() {
+        // Use a TTL of 1 second so cookie expires quickly
+        let mut jar = CookieJar::with_ttl(random_key(), 1);
+        let cookie = jar.make_cookie(&random_key(), &random_key(), 15);
+
+        // Wait for the cookie to expire
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let err = jar.open_cookie(&cookie).unwrap_err();
+        assert!(err.to_string().contains("expired"));
+    }
+
+    #[test]
+    fn lru_eviction_preserves_recent_nonces() {
+        let mut jar = CookieJar::new(random_key());
+
+        // Fill up the nonce set to the max
+        let mut cookies = Vec::new();
+        for _ in 0..MAX_USED_NONCES {
+            let cookie = jar.make_cookie(&random_key(), &random_key(), 15);
+            jar.open_cookie(&cookie).unwrap();
+            cookies.push(cookie);
+        }
+
+        // Open one more to trigger eviction
+        let extra = jar.make_cookie(&random_key(), &random_key(), 15);
+        jar.open_cookie(&extra).unwrap();
+
+        // Recent cookies should still be detected as replays
+        let recent = &cookies[cookies.len() - 1];
+        assert!(jar.open_cookie(recent).is_err());
+
+        // Very old cookies (in the evicted batch) are no longer tracked,
+        // but they would still fail decryption with the replay nonce being
+        // different — however the nonce tracking is the first line of defense.
+        // The eviction is a bounded-memory tradeoff.
+    }
+
+    #[test]
+    fn key_id_changes_on_rotation() {
+        let key1 = random_key();
+        let key2 = random_key();
+        let mut jar = CookieJar::new(key1);
+
+        let id1 = jar.current_key_id;
+        jar.rotate_key(key2);
+        let id2 = jar.current_key_id;
+
+        // Extremely unlikely that two random keys produce the same key_id
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn key_id_in_cookie_matches_key() {
+        let key = random_key();
+        let jar = CookieJar::new(key);
+
+        let cookie = jar.make_cookie(&random_key(), &random_key(), 15);
+        let embedded_id = u32::from_be_bytes([cookie[0], cookie[1], cookie[2], cookie[3]]);
+
+        assert_eq!(embedded_id, derive_key_id(&key));
     }
 }

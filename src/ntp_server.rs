@@ -42,6 +42,12 @@ impl RateLimiter {
         }
     }
 
+    /// Returns `true` if the IP has an existing rate-limiter bucket (i.e.,
+    /// we have seen at least one successful request from this IP).
+    fn is_known(&self, ip: &IpAddr) -> bool {
+        self.buckets.contains_key(ip)
+    }
+
     /// Check whether the given IP is allowed to send a request right now.
     /// Returns `true` if the request is allowed, `false` if rate-limited.
     fn allow(&mut self, ip: IpAddr) -> bool {
@@ -157,17 +163,24 @@ pub async fn run_ntp_server(
                         }
 
                         // Per-IP rate limiting check.
+                        // Remember whether we've seen this IP before *before*
+                        // allow() potentially creates a new bucket for it.
+                        let known_ip = rate_limiter.is_known(&client_addr.ip());
                         if !rate_limiter.allow(client_addr.ip()) {
                             debug!("Rate-limiting client {}", client_addr);
                             if metrics_enabled {
                                 instruments::increment_ntp_rate_limited();
                             }
 
-                            // Attempt to send a KoD RATE packet. We need a
-                            // minimally parsed request to copy the origin
-                            // timestamp. If the packet is too short to parse,
-                            // just drop silently.
-                            if len >= NTP_HEADER_SIZE && let Ok(request) = NtpPacket::parse(&buf[..len]) {
+                            // Only send KoD RATE to IPs that already had a
+                            // bucket (i.e., previously seen clients). Silently
+                            // drop packets from unknown IPs to avoid being used
+                            // as a reflected amplification vector via spoofed
+                            // source addresses.
+                            if known_ip
+                                && len >= NTP_HEADER_SIZE
+                                && let Ok(request) = NtpPacket::parse(&buf[..len])
+                            {
                                 let kod = build_kod_rate_response(&request, receive_ts);
                                 let _ = socket.send_to(&kod.serialize(), client_addr).await;
                             }

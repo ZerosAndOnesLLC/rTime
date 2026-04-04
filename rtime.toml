@@ -9,6 +9,7 @@ interface = "system"
 
 [ntp]
 enabled = true
+# Bind to all interfaces for public NTP service (default: 127.0.0.1:123)
 listen = "0.0.0.0:123"
 
 [[ntp.sources]]
