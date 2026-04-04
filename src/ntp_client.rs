@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result, bail};
@@ -58,7 +59,7 @@ pub async fn run_ntp_client(
     );
 
     let mut query_count: u64 = 0;
-    let mut jitter_samples: Vec<f64> = Vec::new();
+    let mut jitter_samples: VecDeque<f64> = VecDeque::new();
     let mut last_offset_ms: Option<f64> = None;
     let peer_label = server_addr.to_string();
 
@@ -98,10 +99,10 @@ pub async fn run_ntp_client(
                 // Update jitter estimate (RMS of successive offset differences).
                 let jitter = if let Some(prev) = last_offset_ms {
                     let diff = offset_ms - prev;
-                    jitter_samples.push(diff * diff);
+                    jitter_samples.push_back(diff * diff);
                     // Keep last 8 samples for jitter calculation.
                     if jitter_samples.len() > 8 {
-                        jitter_samples.remove(0);
+                        jitter_samples.pop_front();
                     }
                     let sum: f64 = jitter_samples.iter().sum();
                     (sum / jitter_samples.len() as f64).sqrt()

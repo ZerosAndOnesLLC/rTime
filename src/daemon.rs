@@ -393,6 +393,14 @@ impl Daemon {
                         if let Some(ref peer_id) = result.system_peer {
                             // Find the measurement for the selected system peer.
                             if let Some(selected) = measurements.iter().find(|m| m.id == *peer_id) {
+                                // Reject sources with invalid stratum (valid synced range: 1-15).
+                                if selected.stratum == 0 || selected.stratum > 15 {
+                                    warn!(
+                                        "Ignoring peer {} with invalid stratum {}",
+                                        peer_id, selected.stratum,
+                                    );
+                                    continue;
+                                }
                                 let mut state = server_state.write().await;
                                 state.stratum = selected.stratum.saturating_add(1);
                                 state.leap_indicator = selected.leap_indicator;

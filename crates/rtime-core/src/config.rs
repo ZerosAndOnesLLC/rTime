@@ -365,7 +365,14 @@ impl RtimeConfig {
             }
         }
 
-        // Warn-level checks: non-loopback management/metrics
+        // Reject empty or whitespace-only API keys
+        if self.management.api_key.as_ref().is_some_and(|k| k.trim().is_empty()) {
+            return Err(ConfigError::InvalidValue(
+                "management.api_key must not be empty or whitespace-only".into(),
+            ));
+        }
+
+        // Non-loopback management/metrics checks
         let mgmt_addr: std::net::SocketAddr = self.management.listen.parse().unwrap_or_else(|_| {
             "127.0.0.1:9200".parse().unwrap()
         });

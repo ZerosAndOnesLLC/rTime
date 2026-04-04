@@ -98,17 +98,30 @@ impl ExtensionField {
     ///
     /// The length field includes the 4-byte header. The value is padded
     /// to a 4-byte boundary with zeros.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug mode if the total wire length exceeds `u16::MAX`.
+    /// In release mode, the length is clamped to `u16::MAX`.
     pub fn serialize(&self) -> Vec<u8> {
         let total_len = self.wire_length();
+        debug_assert!(
+            total_len <= u16::MAX as usize,
+            "extension field too large for u16 length: {} bytes",
+            total_len
+        );
+        let wire_len = u16::try_from(total_len).unwrap_or(u16::MAX);
         let mut buf = Vec::with_capacity(total_len);
 
         buf.extend_from_slice(&self.field_type.to_be_bytes());
-        buf.extend_from_slice(&(total_len as u16).to_be_bytes());
+        buf.extend_from_slice(&wire_len.to_be_bytes());
         buf.extend_from_slice(&self.value);
 
         // Pad to 4-byte alignment
         let padding = self.padded_value_len() - self.value.len();
-        buf.extend_from_slice(&vec![0u8; padding]);
+        if padding > 0 {
+            buf.extend_from_slice(&vec![0u8; padding]);
+        }
 
         buf
     }

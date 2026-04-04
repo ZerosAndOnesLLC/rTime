@@ -67,7 +67,9 @@ impl RateLimiter {
         });
 
         // Refill tokens based on elapsed time.
-        let elapsed = now.duration_since(bucket.last_update).as_secs_f64();
+        let elapsed = now.checked_duration_since(bucket.last_update)
+            .unwrap_or_default()
+            .as_secs_f64();
         bucket.tokens = (bucket.tokens + elapsed * max_rate).min(burst);
         bucket.last_update = now;
 
