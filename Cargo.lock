@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "rtime"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-clock"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "libc",
  "rtime-core",
@@ -1048,7 +1048,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-core"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-metrics"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "axum",
  "metrics",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-net"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "libc",
  "rtime-core",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-ntp"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "rand",
  "rtime-core",
@@ -1088,7 +1088,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-nts"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "aes-siv",
  "rand",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-ptp"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "rtime-core",
  "thiserror 2.0.18",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "rtime-refclock"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "libc",
  "rtime-core",

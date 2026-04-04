@@ -4,11 +4,13 @@
 //! sends DelayReq messages, and feeds SourceMeasurement into the shared selection
 //! pipeline alongside NTP sources.
 
+use std::collections::VecDeque;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use rand::RngCore;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
@@ -45,15 +47,10 @@ const MAX_FOREIGN_MASTERS: usize = 5;
 /// Interval between DelayReq messages (seconds).
 const DELAY_REQ_INTERVAL_SECS: u64 = 2;
 
-/// Generate a random clock identity from random bytes.
+/// Generate a random clock identity using cryptographic RNG.
 fn generate_clock_identity() -> [u8; 8] {
     let mut id = [0u8; 8];
-    // Use a simple approach: take system time nanos + random
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let nanos = now.as_nanos();
-    id.copy_from_slice(&nanos.to_le_bytes()[..8]);
+    rand::rng().fill_bytes(&mut id);
     // Mark as locally-administered by setting bit 1 of the first octet
     id[0] |= 0x02;
     id
@@ -156,7 +153,7 @@ pub async fn run_ptp_node(
     let mut delay_req_seq: u16 = 0;
 
     // Jitter tracking.
-    let mut jitter_samples: Vec<f64> = Vec::new();
+    let mut jitter_samples: VecDeque<f64> = VecDeque::new();
     let mut last_offset_ms: Option<f64> = None;
 
     // Timer for sending DelayReq messages.
@@ -186,7 +183,7 @@ pub async fn run_ptp_node(
                     Ok((len, from)) => {
                         // Rate limit incoming packets.
                         let now_rl = Instant::now();
-                        if now_rl.duration_since(ptp_rate_limit_reset) >= Duration::from_secs(1) {
+                        if now_rl.checked_duration_since(ptp_rate_limit_reset).unwrap_or_default() >= Duration::from_secs(1) {
                             ptp_packet_count = 0;
                             ptp_rate_limit_reset = now_rl;
                         }
@@ -225,7 +222,7 @@ pub async fn run_ptp_node(
                     Ok((len, from)) => {
                         // Share rate limit counter with event socket.
                         let now_rl = Instant::now();
-                        if now_rl.duration_since(ptp_rate_limit_reset) >= Duration::from_secs(1) {
+                        if now_rl.checked_duration_since(ptp_rate_limit_reset).unwrap_or_default() >= Duration::from_secs(1) {
                             ptp_packet_count = 0;
                             ptp_rate_limit_reset = now_rl;
                         }
@@ -310,7 +307,7 @@ async fn handle_event_message(
     pending_sync_seq: &mut Option<u16>,
     pending_sync_t2: &mut Option<PtpTimestamp>,
     current_master: &mut Option<PortIdentity>,
-    jitter_samples: &mut Vec<f64>,
+    jitter_samples: &mut VecDeque<f64>,
     last_offset_ms: &mut Option<f64>,
     measurement_tx: &mpsc::Sender<SourceMeasurement>,
 ) -> Result<()> {
@@ -385,9 +382,9 @@ async fn handle_event_message(
                 // Update jitter estimate.
                 let jitter = if let Some(prev) = *last_offset_ms {
                     let diff = offset_ms - prev;
-                    jitter_samples.push(diff * diff);
+                    jitter_samples.push_back(diff * diff);
                     if jitter_samples.len() > JITTER_WINDOW {
-                        jitter_samples.remove(0);
+                        jitter_samples.pop_front();
                     }
                     let sum: f64 = jitter_samples.iter().sum();
                     (sum / jitter_samples.len() as f64).sqrt()
