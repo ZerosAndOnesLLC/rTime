@@ -9,6 +9,7 @@
 use std::net::Ipv4Addr;
 use std::os::unix::io::AsRawFd;
 
+use nix::sys::socket::{IpMembershipRequest, setsockopt, sockopt};
 use tokio::net::UdpSocket;
 
 /// PTP multicast addresses (IEEE 1588 Annex D).
@@ -29,31 +30,10 @@ pub fn join_multicast(
     multicast_addr: Ipv4Addr,
     interface: Ipv4Addr,
 ) -> std::io::Result<()> {
-    let mreq = libc::ip_mreq {
-        imr_multiaddr: libc::in_addr {
-            s_addr: u32::from_ne_bytes(multicast_addr.octets()),
-        },
-        imr_interface: libc::in_addr {
-            s_addr: u32::from_ne_bytes(interface.octets()),
-        },
-    };
-
-    let fd = socket.as_raw_fd();
-    let ret = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_ADD_MEMBERSHIP,
-            &mreq as *const libc::ip_mreq as *const libc::c_void,
-            std::mem::size_of::<libc::ip_mreq>() as libc::socklen_t,
-        )
-    };
-
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    Ok(())
+    let interface_opt = if interface.is_unspecified() { None } else { Some(interface) };
+    let mreq = IpMembershipRequest::new(multicast_addr, interface_opt);
+    setsockopt(socket, sockopt::IpAddMembership, &mreq)
+        .map_err(std::io::Error::from)
 }
 
 /// Leave a multicast group on the given interface.
@@ -64,31 +44,10 @@ pub fn leave_multicast(
     multicast_addr: Ipv4Addr,
     interface: Ipv4Addr,
 ) -> std::io::Result<()> {
-    let mreq = libc::ip_mreq {
-        imr_multiaddr: libc::in_addr {
-            s_addr: u32::from_ne_bytes(multicast_addr.octets()),
-        },
-        imr_interface: libc::in_addr {
-            s_addr: u32::from_ne_bytes(interface.octets()),
-        },
-    };
-
-    let fd = socket.as_raw_fd();
-    let ret = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_DROP_MEMBERSHIP,
-            &mreq as *const libc::ip_mreq as *const libc::c_void,
-            std::mem::size_of::<libc::ip_mreq>() as libc::socklen_t,
-        )
-    };
-
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    Ok(())
+    let interface_opt = if interface.is_unspecified() { None } else { Some(interface) };
+    let mreq = IpMembershipRequest::new(multicast_addr, interface_opt);
+    setsockopt(socket, sockopt::IpDropMembership, &mreq)
+        .map_err(std::io::Error::from)
 }
 
 /// Set the outgoing multicast interface for the socket.
@@ -98,6 +57,7 @@ pub fn set_multicast_interface(
     socket: &UdpSocket,
     interface: Ipv4Addr,
 ) -> std::io::Result<()> {
+    // nix 0.29 does not expose IP_MULTICAST_IF as a typed sockopt; fall back to libc.
     let addr = libc::in_addr {
         s_addr: u32::from_ne_bytes(interface.octets()),
     };
@@ -126,23 +86,8 @@ pub fn set_multicast_interface(
 /// to receivers on the same host. This is typically desired for PTP to avoid
 /// processing our own messages.
 pub fn set_multicast_loopback(socket: &UdpSocket, enabled: bool) -> std::io::Result<()> {
-    let val: libc::c_int = if enabled { 1 } else { 0 };
-    let fd = socket.as_raw_fd();
-    let ret = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_MULTICAST_LOOP,
-            &val as *const libc::c_int as *const libc::c_void,
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        )
-    };
-
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    Ok(())
+    setsockopt(socket, sockopt::IpMulticastLoop, &enabled)
+        .map_err(std::io::Error::from)
 }
 
 /// Set the multicast TTL (time-to-live / hop limit).
@@ -150,23 +95,8 @@ pub fn set_multicast_loopback(socket: &UdpSocket, enabled: bool) -> std::io::Res
 /// PTP typically uses TTL=1 for link-local multicast (peer delay)
 /// and TTL=128 for domain-scoped multicast.
 pub fn set_multicast_ttl(socket: &UdpSocket, ttl: u8) -> std::io::Result<()> {
-    let val = ttl as libc::c_int;
-    let fd = socket.as_raw_fd();
-    let ret = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_MULTICAST_TTL,
-            &val as *const libc::c_int as *const libc::c_void,
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        )
-    };
-
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    Ok(())
+    setsockopt(socket, sockopt::IpMulticastTtl, &ttl)
+        .map_err(std::io::Error::from)
 }
 
 #[cfg(test)]

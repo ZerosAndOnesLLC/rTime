@@ -10,3 +10,4 @@ description = "Platform clock interfaces for rTime"
 rtime-core = { workspace = true }
 thiserror = { workspace = true }
 libc = { workspace = true }
+nix = { workspace = true }

@@ -17,16 +17,9 @@ impl UnixClock {
         Self { adjustable }
     }
 
-    fn read_clock() -> Result<libc::timespec, ClockError> {
-        let mut ts = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let ret = unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut ts) };
-        if ret != 0 {
-            return Err(ClockError::Os(std::io::Error::last_os_error()));
-        }
-        Ok(ts)
+    fn read_clock() -> Result<nix::sys::time::TimeSpec, ClockError> {
+        nix::time::clock_gettime(nix::time::ClockId::CLOCK_REALTIME)
+            .map_err(|e| ClockError::Os(e.into()))
     }
 
     // --- probe_adjustable ---
@@ -77,39 +70,34 @@ impl UnixClock {
 
     #[cfg(target_os = "freebsd")]
     fn step_impl(&self, offset: NtpDuration) -> Result<(), ClockError> {
+        use nix::sys::time::TimeSpec;
         // FreeBSD lacks ADJ_SETOFFSET. Read current time, add offset, set.
-        let mut ts = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let ret = unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut ts) };
-        if ret != 0 {
-            return Err(ClockError::Os(std::io::Error::last_os_error()));
-        }
+        let ts = nix::time::clock_gettime(nix::time::ClockId::CLOCK_REALTIME)
+            .map_err(|e| ClockError::Os(e.into()))?;
 
         let nanos = offset.to_nanos();
-        ts.tv_sec += nanos / 1_000_000_000;
-        ts.tv_nsec += nanos % 1_000_000_000;
+        let mut tv_sec = ts.tv_sec() + nanos / 1_000_000_000;
+        let mut tv_nsec = ts.tv_nsec() + (nanos % 1_000_000_000) as libc::c_long;
 
         // Normalize tv_nsec into [0, 999_999_999]
-        while ts.tv_nsec >= 1_000_000_000 {
-            ts.tv_sec += 1;
-            ts.tv_nsec -= 1_000_000_000;
+        while tv_nsec >= 1_000_000_000 {
+            tv_sec += 1;
+            tv_nsec -= 1_000_000_000;
         }
-        while ts.tv_nsec < 0 {
-            ts.tv_sec -= 1;
-            ts.tv_nsec += 1_000_000_000;
+        while tv_nsec < 0 {
+            tv_sec -= 1;
+            tv_nsec += 1_000_000_000;
         }
 
-        let ret = unsafe { libc::clock_settime(libc::CLOCK_REALTIME, &ts) };
-        if ret != 0 {
-            let err = std::io::Error::last_os_error();
+        let new_ts = TimeSpec::new(tv_sec, tv_nsec);
+        nix::time::clock_settime(nix::time::ClockId::CLOCK_REALTIME, new_ts).map_err(|e| {
+            let err: std::io::Error = e.into();
             if err.raw_os_error() == Some(libc::EPERM) {
-                return Err(ClockError::PermissionDenied);
+                ClockError::PermissionDenied
+            } else {
+                ClockError::Os(err)
             }
-            return Err(ClockError::Os(err));
-        }
-        Ok(())
+        })
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
@@ -203,7 +191,7 @@ impl Clock for UnixClock {
     fn now(&self) -> Result<NtpTimestamp, ClockError> {
         let ts = Self::read_clock()?;
         let st = std::time::UNIX_EPOCH
-            + std::time::Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32);
+            + std::time::Duration::new(ts.tv_sec() as u64, ts.tv_nsec() as u32);
         Ok(NtpTimestamp::from_system_time(st))
     }
 

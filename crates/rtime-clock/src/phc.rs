@@ -1,8 +1,10 @@
 #[cfg(target_os = "linux")]
 mod linux_phc {
-    use std::ffi::CString;
+    use std::os::fd::AsRawFd;
     use std::sync::Mutex;
 
+    use nix::sys::time::TimeSpec;
+    use nix::time::ClockId;
     use rtime_core::clock::{Clock, ClockError};
     use rtime_core::timestamp::{NtpDuration, NtpTimestamp, PtpTimestamp};
 
@@ -28,7 +30,8 @@ mod linux_phc {
     /// The internal Mutex ensures that read-modify-write operations like `step()`
     /// are atomic with respect to concurrent callers.
     pub struct PhcClock {
-        fd: libc::c_int,
+        /// Owned handle; File's Drop closes the fd automatically.
+        file: std::fs::File,
         clockid: libc::clockid_t,
         device_path: String,
         /// Guards clock mutation operations (step, adjust_frequency) to prevent
@@ -39,17 +42,12 @@ mod linux_phc {
     impl std::fmt::Debug for PhcClock {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("PhcClock")
-                .field("fd", &self.fd)
+                .field("fd", &self.file.as_raw_fd())
                 .field("clockid", &self.clockid)
                 .field("device_path", &self.device_path)
                 .finish()
         }
     }
-
-    // SAFETY: The file descriptor is owned and mutation operations are
-    // serialized through the discipline_lock Mutex.
-    unsafe impl Send for PhcClock {}
-    unsafe impl Sync for PhcClock {}
 
     impl PhcClock {
         /// Open a PTP hardware clock device.
@@ -57,22 +55,20 @@ mod linux_phc {
         /// `device` should be a path like `/dev/ptp0`. The device must exist and be
         /// readable by the current process.
         pub fn open(device: &str) -> Result<Self, ClockError> {
-            let c_path = CString::new(device).map_err(|_| ClockError::DeviceNotFound)?;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(device)
+                .map_err(|err| match err.raw_os_error() {
+                    Some(libc::ENOENT) | Some(libc::ENXIO) => ClockError::DeviceNotFound,
+                    Some(libc::EACCES) | Some(libc::EPERM) => ClockError::PermissionDenied,
+                    _ => ClockError::Os(err),
+                })?;
 
-            let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR) };
-            if fd < 0 {
-                let err = std::io::Error::last_os_error();
-                return match err.raw_os_error() {
-                    Some(libc::ENOENT) | Some(libc::ENXIO) => Err(ClockError::DeviceNotFound),
-                    Some(libc::EACCES) | Some(libc::EPERM) => Err(ClockError::PermissionDenied),
-                    _ => Err(ClockError::Os(err)),
-                };
-            }
-
-            let clockid = fd_to_clockid(fd);
+            let clockid = fd_to_clockid(file.as_raw_fd());
 
             Ok(Self {
-                fd,
+                file,
                 clockid,
                 device_path: device.to_string(),
                 discipline_lock: Mutex::new(()),
@@ -84,21 +80,15 @@ mod linux_phc {
         /// Uses `clock_gettime` with the dynamic clockid derived from the PHC file
         /// descriptor.
         pub fn read_time(&self) -> Result<PtpTimestamp, ClockError> {
-            let mut ts = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
+            let ts = nix::time::clock_gettime(ClockId::from_raw(self.clockid)).map_err(|e| {
+                let err: std::io::Error = e.into();
+                match err.raw_os_error() {
+                    Some(libc::EINVAL) => ClockError::DeviceNotFound,
+                    _ => ClockError::Os(err),
+                }
+            })?;
 
-            let ret = unsafe { libc::clock_gettime(self.clockid, &mut ts) };
-            if ret < 0 {
-                let err = std::io::Error::last_os_error();
-                return match err.raw_os_error() {
-                    Some(libc::EINVAL) => Err(ClockError::DeviceNotFound),
-                    _ => Err(ClockError::Os(err)),
-                };
-            }
-
-            Ok(PtpTimestamp::new(ts.tv_sec as u64, ts.tv_nsec as u32))
+            Ok(PtpTimestamp::new(ts.tv_sec() as u64, ts.tv_nsec() as u32))
         }
 
         /// Get the device path this clock was opened from.
@@ -108,22 +98,12 @@ mod linux_phc {
 
         /// Get the raw file descriptor (for advanced ioctl operations).
         pub fn as_raw_fd(&self) -> libc::c_int {
-            self.fd
+            self.file.as_raw_fd()
         }
 
         /// Get the dynamic clockid for this PHC.
         pub fn clockid(&self) -> libc::clockid_t {
             self.clockid
-        }
-    }
-
-    impl Drop for PhcClock {
-        fn drop(&mut self) {
-            if self.fd >= 0 {
-                unsafe {
-                    libc::close(self.fd);
-                }
-            }
         }
     }
 
@@ -142,19 +122,12 @@ mod linux_phc {
                 ))
             })?;
 
-            // Read current time, apply offset, and set.
-            let mut ts = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            };
-
-            let ret = unsafe { libc::clock_gettime(self.clockid, &mut ts) };
-            if ret < 0 {
-                return Err(ClockError::Os(std::io::Error::last_os_error()));
-            }
+            let clock = ClockId::from_raw(self.clockid);
+            let ts = nix::time::clock_gettime(clock)
+                .map_err(|e| ClockError::Os(e.into()))?;
 
             let nanos = offset.to_nanos();
-            let total_ns = ts.tv_sec * 1_000_000_000 + ts.tv_nsec + nanos;
+            let total_ns = ts.tv_sec() as i64 * 1_000_000_000 + ts.tv_nsec() as i64 + nanos;
 
             if total_ns < 0 {
                 return Err(ClockError::Os(std::io::Error::new(
@@ -163,17 +136,18 @@ mod linux_phc {
                 )));
             }
 
-            ts.tv_sec = (total_ns / 1_000_000_000) as libc::time_t;
-            ts.tv_nsec = (total_ns % 1_000_000_000) as libc::c_long;
+            let new_ts = TimeSpec::new(
+                (total_ns / 1_000_000_000) as libc::time_t,
+                (total_ns % 1_000_000_000) as libc::c_long,
+            );
 
-            let ret = unsafe { libc::clock_settime(self.clockid, &ts) };
-            if ret < 0 {
-                let err = std::io::Error::last_os_error();
-                return match err.raw_os_error() {
-                    Some(libc::EPERM) => Err(ClockError::PermissionDenied),
-                    _ => Err(ClockError::Os(err)),
-                };
-            }
+            nix::time::clock_settime(clock, new_ts).map_err(|e| {
+                let err: std::io::Error = e.into();
+                match err.raw_os_error() {
+                    Some(libc::EPERM) => ClockError::PermissionDenied,
+                    _ => ClockError::Os(err),
+                }
+            })?;
 
             Ok(())
         }

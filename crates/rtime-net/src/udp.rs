@@ -1,33 +1,7 @@
 use std::net::SocketAddr;
-use std::os::unix::io::AsRawFd;
 
 use rtime_core::timestamp::NtpTimestamp;
 use tokio::net::UdpSocket;
-
-// ---------------------------------------------------------------------------
-// Platform-specific timestamping constants
-// ---------------------------------------------------------------------------
-
-/// Linux-specific SO_TIMESTAMPING constants (linux/net_tstamp.h).
-/// Defined here because libc may not expose them.
-#[cfg(target_os = "linux")]
-mod timestamping {
-    pub const SO_TIMESTAMPING: libc::c_int = 37;
-    pub const SO_TIMESTAMPNS: libc::c_int = 35;
-    pub const SOF_TIMESTAMPING_TX_HARDWARE: u32 = 1 << 0;
-    pub const SOF_TIMESTAMPING_TX_SOFTWARE: u32 = 1 << 1;
-    pub const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
-    pub const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
-    pub const SOF_TIMESTAMPING_SOFTWARE: u32 = 1 << 4;
-    pub const SOF_TIMESTAMPING_RAW_HARDWARE: u32 = 1 << 6;
-}
-
-/// FreeBSD uses SO_TIMESTAMP (microsecond-resolution timestamps).
-/// Hardware timestamping is not available through this socket API on FreeBSD.
-#[cfg(target_os = "freebsd")]
-mod timestamping {
-    pub const SO_TIMESTAMP: libc::c_int = 0x0400;
-}
 
 /// Timestamping mode currently active on the socket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,22 +105,12 @@ impl TimestampedSocket {
     /// than userspace timestamps taken after the syscall returns.
     #[cfg(target_os = "linux")]
     pub fn enable_software_timestamps(&mut self) -> std::io::Result<()> {
-        let val: libc::c_int = 1;
-        let fd = self.inner.as_raw_fd();
-
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                timestamping::SO_TIMESTAMPNS,
-                &val as *const libc::c_int as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            )
-        };
-
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        nix::sys::socket::setsockopt(
+            &self.inner,
+            nix::sys::socket::sockopt::ReceiveTimestampns,
+            &true,
+        )
+        .map_err(std::io::Error::from)?;
 
         self.mode = TimestampMode::Software;
         Ok(())
@@ -158,22 +122,12 @@ impl TimestampedSocket {
     /// the kernel network stack.
     #[cfg(target_os = "freebsd")]
     pub fn enable_software_timestamps(&mut self) -> std::io::Result<()> {
-        let val: libc::c_int = 1;
-        let fd = self.inner.as_raw_fd();
-
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                timestamping::SO_TIMESTAMP,
-                &val as *const libc::c_int as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            )
-        };
-
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        nix::sys::socket::setsockopt(
+            &self.inner,
+            nix::sys::socket::sockopt::ReceiveTimestamp,
+            &true,
+        )
+        .map_err(std::io::Error::from)?;
 
         self.mode = TimestampMode::Software;
         Ok(())
@@ -197,46 +151,25 @@ impl TimestampedSocket {
     /// fell back to software timestamping.
     #[cfg(target_os = "linux")]
     pub fn enable_hardware_timestamps(&mut self) -> std::io::Result<bool> {
-        let fd = self.inner.as_raw_fd();
+        use nix::sys::socket::{TimestampingFlag, setsockopt, sockopt};
 
         // Try hardware first.
-        let hw_flags: u32 = timestamping::SOF_TIMESTAMPING_TX_HARDWARE
-            | timestamping::SOF_TIMESTAMPING_RX_HARDWARE
-            | timestamping::SOF_TIMESTAMPING_RAW_HARDWARE;
+        let hw_flags = TimestampingFlag::SOF_TIMESTAMPING_TX_HARDWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_RX_HARDWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_RAW_HARDWARE;
 
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                timestamping::SO_TIMESTAMPING,
-                &hw_flags as *const u32 as *const libc::c_void,
-                std::mem::size_of::<u32>() as libc::socklen_t,
-            )
-        };
-
-        if ret == 0 {
+        if setsockopt(&self.inner, sockopt::Timestamping, &hw_flags).is_ok() {
             self.mode = TimestampMode::Hardware;
             return Ok(true);
         }
 
         // Hardware not available -- fall back to software via SO_TIMESTAMPING.
-        let sw_flags: u32 = timestamping::SOF_TIMESTAMPING_TX_SOFTWARE
-            | timestamping::SOF_TIMESTAMPING_RX_SOFTWARE
-            | timestamping::SOF_TIMESTAMPING_SOFTWARE;
+        let sw_flags = TimestampingFlag::SOF_TIMESTAMPING_TX_SOFTWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_RX_SOFTWARE
+            | TimestampingFlag::SOF_TIMESTAMPING_SOFTWARE;
 
-        let ret = unsafe {
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                timestamping::SO_TIMESTAMPING,
-                &sw_flags as *const u32 as *const libc::c_void,
-                std::mem::size_of::<u32>() as libc::socklen_t,
-            )
-        };
-
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        setsockopt(&self.inner, sockopt::Timestamping, &sw_flags)
+            .map_err(std::io::Error::from)?;
 
         self.mode = TimestampMode::Software;
         Ok(false)

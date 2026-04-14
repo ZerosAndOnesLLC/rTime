@@ -11,3 +11,4 @@ rtime-core = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 libc = { workspace = true }
+nix = { workspace = true }
