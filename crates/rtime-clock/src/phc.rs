@@ -163,33 +163,26 @@ mod linux_phc {
             // Use clock_adjtime to adjust the PHC frequency.
             let freq = (ppm * 65536.0) as i64;
 
-            let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-            tx.modes = libc::ADJ_FREQUENCY;
-            tx.freq = freq;
+            let mut tx = crate::adjtime::Timex::new();
+            tx.0.modes = libc::ADJ_FREQUENCY;
+            tx.0.freq = freq;
 
-            let ret = unsafe { libc::clock_adjtime(self.clockid, &mut tx) };
-            if ret < 0 {
-                let err = std::io::Error::last_os_error();
-                return match err.raw_os_error() {
-                    Some(libc::EPERM) => Err(ClockError::PermissionDenied),
-                    Some(libc::EOPNOTSUPP) => Err(ClockError::NotSupported),
-                    _ => Err(ClockError::Os(err)),
-                };
-            }
+            crate::adjtime::clock_adjtime(self.clockid, &mut tx).map_err(|err| {
+                match err.raw_os_error() {
+                    Some(libc::EPERM) => ClockError::PermissionDenied,
+                    Some(libc::EOPNOTSUPP) => ClockError::NotSupported,
+                    _ => ClockError::Os(err),
+                }
+            })?;
 
             Ok(())
         }
 
         fn frequency_offset(&self) -> Result<f64, ClockError> {
-            let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-            tx.modes = 0; // read-only query
-
-            let ret = unsafe { libc::clock_adjtime(self.clockid, &mut tx) };
-            if ret < 0 {
-                return Err(ClockError::Os(std::io::Error::last_os_error()));
-            }
-
-            Ok(tx.freq as f64 / 65536.0)
+            let mut tx = crate::adjtime::Timex::new(); // modes = 0 => query
+            crate::adjtime::clock_adjtime(self.clockid, &mut tx)
+                .map_err(ClockError::Os)?;
+            Ok(tx.0.freq as f64 / 65536.0)
         }
 
         fn resolution(&self) -> NtpDuration {

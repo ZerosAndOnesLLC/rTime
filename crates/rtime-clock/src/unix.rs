@@ -1,6 +1,8 @@
 use rtime_core::clock::{Clock, ClockError};
 use rtime_core::timestamp::{NtpDuration, NtpTimestamp};
 
+use crate::adjtime::Timex;
+
 /// FreeBSD MOD_FREQUENCY constant for ntp_adjtime().
 #[cfg(target_os = "freebsd")]
 const MOD_FREQUENCY: u32 = 0x0002;
@@ -26,20 +28,14 @@ impl UnixClock {
 
     #[cfg(target_os = "linux")]
     fn probe_adjustable() -> bool {
-        unsafe {
-            let mut tx: libc::timex = std::mem::zeroed();
-            tx.modes = 0; // read-only query
-            libc::adjtimex(&mut tx) >= 0
-        }
+        let mut tx = Timex::new(); // modes = 0 => read-only query
+        crate::adjtime::adjtimex(&mut tx).is_ok()
     }
 
     #[cfg(target_os = "freebsd")]
     fn probe_adjustable() -> bool {
-        unsafe {
-            let mut tx: libc::timex = std::mem::zeroed();
-            tx.modes = 0; // read-only query
-            libc::ntp_adjtime(&mut tx) >= 0
-        }
+        let mut tx = Timex::new(); // modes = 0 => read-only query
+        crate::adjtime::ntp_adjtime(&mut tx).is_ok()
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
@@ -52,19 +48,18 @@ impl UnixClock {
     #[cfg(target_os = "linux")]
     fn step_impl(&self, offset: NtpDuration) -> Result<(), ClockError> {
         let nanos = offset.to_nanos();
-        let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-        tx.modes = libc::ADJ_SETOFFSET | libc::ADJ_NANO;
-        tx.time.tv_sec = nanos / 1_000_000_000;
-        tx.time.tv_usec = nanos % 1_000_000_000;
+        let mut tx = Timex::new();
+        tx.0.modes = libc::ADJ_SETOFFSET | libc::ADJ_NANO;
+        tx.0.time.tv_sec = nanos / 1_000_000_000;
+        tx.0.time.tv_usec = nanos % 1_000_000_000;
 
-        let ret = unsafe { libc::adjtimex(&mut tx) };
-        if ret < 0 {
-            let err = std::io::Error::last_os_error();
+        crate::adjtime::adjtimex(&mut tx).map_err(|err| {
             if err.raw_os_error() == Some(libc::EPERM) {
-                return Err(ClockError::PermissionDenied);
+                ClockError::PermissionDenied
+            } else {
+                ClockError::Os(err)
             }
-            return Err(ClockError::Os(err));
-        }
+        })?;
         Ok(())
     }
 
@@ -112,18 +107,17 @@ impl UnixClock {
         // adjtimex freq is in units of 2^-16 ppm (scaled ppm)
         let freq = (ppm * 65536.0) as i64;
 
-        let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-        tx.modes = libc::ADJ_FREQUENCY;
-        tx.freq = freq;
+        let mut tx = Timex::new();
+        tx.0.modes = libc::ADJ_FREQUENCY;
+        tx.0.freq = freq;
 
-        let ret = unsafe { libc::adjtimex(&mut tx) };
-        if ret < 0 {
-            let err = std::io::Error::last_os_error();
+        crate::adjtime::adjtimex(&mut tx).map_err(|err| {
             if err.raw_os_error() == Some(libc::EPERM) {
-                return Err(ClockError::PermissionDenied);
+                ClockError::PermissionDenied
+            } else {
+                ClockError::Os(err)
             }
-            return Err(ClockError::Os(err));
-        }
+        })?;
         Ok(())
     }
 
@@ -131,18 +125,17 @@ impl UnixClock {
     fn adjust_frequency_impl(&self, ppm: f64) -> Result<(), ClockError> {
         let freq = (ppm * 65536.0) as i64;
 
-        let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-        tx.modes = MOD_FREQUENCY as u32;
-        tx.freq = freq;
+        let mut tx = Timex::new();
+        tx.0.modes = MOD_FREQUENCY as u32;
+        tx.0.freq = freq;
 
-        let ret = unsafe { libc::ntp_adjtime(&mut tx) };
-        if ret < 0 {
-            let err = std::io::Error::last_os_error();
+        crate::adjtime::ntp_adjtime(&mut tx).map_err(|err| {
             if err.raw_os_error() == Some(libc::EPERM) {
-                return Err(ClockError::PermissionDenied);
+                ClockError::PermissionDenied
+            } else {
+                ClockError::Os(err)
             }
-            return Err(ClockError::Os(err));
-        }
+        })?;
         Ok(())
     }
 
@@ -155,24 +148,16 @@ impl UnixClock {
 
     #[cfg(target_os = "linux")]
     fn frequency_offset_impl(&self) -> Result<f64, ClockError> {
-        let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-        tx.modes = 0;
-        let ret = unsafe { libc::adjtimex(&mut tx) };
-        if ret < 0 {
-            return Err(ClockError::Os(std::io::Error::last_os_error()));
-        }
-        Ok(tx.freq as f64 / 65536.0)
+        let mut tx = Timex::new(); // modes = 0 => query
+        crate::adjtime::adjtimex(&mut tx).map_err(ClockError::Os)?;
+        Ok(tx.0.freq as f64 / 65536.0)
     }
 
     #[cfg(target_os = "freebsd")]
     fn frequency_offset_impl(&self) -> Result<f64, ClockError> {
-        let mut tx: libc::timex = unsafe { std::mem::zeroed() };
-        tx.modes = 0;
-        let ret = unsafe { libc::ntp_adjtime(&mut tx) };
-        if ret < 0 {
-            return Err(ClockError::Os(std::io::Error::last_os_error()));
-        }
-        Ok(tx.freq as f64 / 65536.0)
+        let mut tx = Timex::new(); // modes = 0 => query
+        crate::adjtime::ntp_adjtime(&mut tx).map_err(ClockError::Os)?;
+        Ok(tx.0.freq as f64 / 65536.0)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
