@@ -120,7 +120,10 @@ impl Daemon {
             None
         };
 
-        // Spawn management API if enabled.
+        // Spawn management API if enabled. Bind failures are NOT fatal —
+        // NTP is the core service; an auxiliary API should not take it down.
+        // See rTime issue #45 — previously this used `?` and a bind-port
+        // race caused an infinite process-restart loop via `daemon -R 5`.
         let management_handle = if self.config.management.enabled {
             let mgmt_addr: SocketAddr = self
                 .config
@@ -132,21 +135,29 @@ impl Daemon {
                     self.config.management.listen
                 ))?;
 
-            let status = Arc::clone(&self.daemon_status);
-            let api_key = self.config.management.api_key.clone();
-            let router = management::management_router(status, api_key);
-            let listener = tokio::net::TcpListener::bind(mgmt_addr)
-                .await
-                .context(format!("failed to bind management API on {}", mgmt_addr))?;
+            match bind_tcp_reuseaddr(mgmt_addr) {
+                Ok(listener) => {
+                    let status = Arc::clone(&self.daemon_status);
+                    let api_key = self.config.management.api_key.clone();
+                    let router = management::management_router(status, api_key);
 
-            let handle = tokio::spawn(async move {
-                if let Err(e) = axum::serve(listener, router).await {
-                    error!("Management API exited with error: {}", e);
+                    let handle = tokio::spawn(async move {
+                        if let Err(e) = axum::serve(listener, router).await {
+                            error!("Management API exited with error: {}", e);
+                        }
+                    });
+
+                    info!("Management API enabled on {}", self.config.management.listen);
+                    Some(handle)
                 }
-            });
-
-            info!("Management API enabled on {}", self.config.management.listen);
-            Some(handle)
+                Err(e) => {
+                    warn!(
+                        "Management API bind failed on {} ({}); continuing without it",
+                        mgmt_addr, e
+                    );
+                    None
+                }
+            }
         } else {
             info!("Management API disabled");
             None
@@ -516,4 +527,17 @@ fn resolve_source_addr(address: &str) -> Result<SocketAddr> {
         .context("failed to resolve address")?
         .next()
         .context("no addresses found")
+}
+
+/// Bind a TCP listener with `SO_REUSEADDR` so a restarted process can reclaim
+/// its port immediately instead of racing against TIME_WAIT sockets from the
+/// prior instance. See rTime issue #45.
+fn bind_tcp_reuseaddr(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = match addr {
+        SocketAddr::V4(_) => tokio::net::TcpSocket::new_v4()?,
+        SocketAddr::V6(_) => tokio::net::TcpSocket::new_v6()?,
+    };
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(1024)
 }

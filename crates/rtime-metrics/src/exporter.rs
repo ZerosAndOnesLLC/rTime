@@ -64,8 +64,22 @@ impl MetricsExporter {
             );
 
         info!("Metrics server listening on {}", addr);
-        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let listener = bind_tcp_reuseaddr(addr)?;
         axum::serve(listener, app).await?;
         Ok(())
     }
+}
+
+/// Bind a TCP listener with `SO_REUSEADDR` so the process can restart cleanly
+/// without losing the port to a TIME_WAIT socket from the previous instance.
+/// See rTime issue #45 — a bind race against TIME_WAIT caused an infinite
+/// process-restart loop on FreeBSD.
+fn bind_tcp_reuseaddr(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    let socket = match addr {
+        SocketAddr::V4(_) => tokio::net::TcpSocket::new_v4()?,
+        SocketAddr::V6(_) => tokio::net::TcpSocket::new_v6()?,
+    };
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(1024)
 }
