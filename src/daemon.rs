@@ -261,13 +261,15 @@ impl Daemon {
 
             let servo_config = ServoConfig {
                 step_threshold_ns: self.config.clock.step_threshold_ms * 1_000_000.0,
+                panic_threshold_ns: self.config.clock.panic_threshold_ms * 1_000_000.0,
                 ..Default::default()
             };
 
             info!(
-                "Clock discipline enabled (adjustable={}, step_threshold={:.0}ms)",
+                "Clock discipline enabled (adjustable={}, step_threshold={:.0}ms, panic_threshold={:.0}ms)",
                 clock.is_adjustable(),
                 self.config.clock.step_threshold_ms,
+                self.config.clock.panic_threshold_ms,
             );
 
             let handle = tokio::spawn(async move {

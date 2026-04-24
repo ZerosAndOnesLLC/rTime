@@ -8,6 +8,8 @@
 //!  2. **FLL (Frequency-Lock Loop)** -- large gains for fast initial convergence.
 //!  3. **PLL (Phase-Lock Loop)** -- small gains for fine-grained tracking.
 
+use tracing::warn;
+
 /// Servo operating state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServoState {
@@ -26,6 +28,8 @@ pub enum ServoAction {
     AdjustFrequency { ppm: f64 },
     /// Step the clock by this offset (too large for slew).
     Step { offset_ns: i64 },
+    /// Measurement was implausibly large; ignored without touching state.
+    Reject { offset_ns: i64 },
     /// No action needed (waiting for more samples).
     None,
 }
@@ -36,6 +40,12 @@ pub struct ServoConfig {
     /// Step threshold in nanoseconds. Offsets larger than this trigger a step.
     /// Default: 128_000_000 (128ms).
     pub step_threshold_ns: f64,
+    /// Panic threshold in nanoseconds. Offsets whose absolute value exceeds
+    /// this are rejected outright -- neither slewed nor stepped -- on the
+    /// assumption that any jump this large is a bug or a spoofed/corrupt
+    /// NTP reply rather than real drift. Must be greater than
+    /// `step_threshold_ns`. Default: 1_000_000_000 (1s).
+    pub panic_threshold_ns: f64,
     /// Maximum frequency adjustment in PPM. Default: 500.0.
     pub max_frequency: f64,
     /// Number of initial samples to skip (for filter warmup). Default: 4.
@@ -48,6 +58,7 @@ impl Default for ServoConfig {
     fn default() -> Self {
         Self {
             step_threshold_ns: 128_000_000.0,
+            panic_threshold_ns: 1_000_000_000.0,
             max_frequency: 500.0,
             init_samples: 4,
             fll_samples: 8,
@@ -114,6 +125,21 @@ impl PiServo {
     /// - `poll_interval_secs`: current polling interval in seconds (tau). This
     ///   controls the PI gain scaling.
     pub fn sample(&mut self, offset_ns: f64, poll_interval_secs: f64) -> ServoAction {
+        // Panic clamp: reject implausibly large offsets before they touch any
+        // state. A real drift this large doesn't occur on a running kernel;
+        // a value this big means the measurement is corrupt, spoofed, or the
+        // result of an NTP-era wrap. Stepping would wreck the clock (see the
+        // year-9920 incident that motivated this guard).
+        if offset_ns.abs() > self.config.panic_threshold_ns {
+            warn!(
+                "Rejecting implausible offset: {:.0} ns exceeds panic threshold {:.0} ns",
+                offset_ns, self.config.panic_threshold_ns
+            );
+            return ServoAction::Reject {
+                offset_ns: offset_ns as i64,
+            };
+        }
+
         self.sample_count += 1;
 
         // Step detection: if offset is larger than the threshold, step the clock
@@ -494,6 +520,78 @@ mod tests {
             }
             other => panic!("expected AdjustFrequency, got {:?}", other),
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Panic threshold: implausibly large offsets are rejected, not stepped
+    // ---------------------------------------------------------------
+    #[test]
+    fn insanely_large_offset_rejected() {
+        let mut servo = default_servo();
+        // 24 million seconds -- matches the kind of bogus step seen in the
+        // year-9920 incident. Should Reject, not Step.
+        let action = servo.sample(24_621_704_000_000_000.0, POLL_INTERVAL);
+        match action {
+            ServoAction::Reject { offset_ns } => {
+                assert_eq!(offset_ns, 24_621_704_000_000_000);
+            }
+            other => panic!("expected Reject, got {:?}", other),
+        }
+        // State must be untouched so good measurements can still drive convergence.
+        assert_eq!(servo.state(), ServoState::Init);
+        assert_eq!(servo.sample_count(), 0);
+    }
+
+    #[test]
+    fn negative_insanely_large_offset_rejected() {
+        let mut servo = default_servo();
+        let action = servo.sample(-24_621_704_000_000_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Reject { .. }));
+        assert_eq!(servo.sample_count(), 0);
+    }
+
+    #[test]
+    fn just_under_panic_threshold_still_steps() {
+        // 999ms is well over the 128ms step threshold but just under the 1s
+        // panic threshold -- it must still step (this is how NTP recovers
+        // from genuine drift after a long outage).
+        let mut servo = default_servo();
+        let action = servo.sample(999_000_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Step { .. }));
+    }
+
+    #[test]
+    fn rejected_sample_does_not_disturb_convergence() {
+        // A single rogue measurement should not reset an already-converging
+        // servo or consume an init slot.
+        let mut servo = servo_with_config(2, 4);
+        servo.sample(1000.0, POLL_INTERVAL); // init sample 1
+        servo.sample(1000.0, POLL_INTERVAL); // init sample 2
+
+        // Now a rogue huge offset arrives -- must be rejected.
+        let action = servo.sample(1e18, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Reject { .. }));
+        // Sample count unchanged, state still Init.
+        assert_eq!(servo.sample_count(), 2);
+        assert_eq!(servo.state(), ServoState::Init);
+
+        // Next real sample should transition to FLL as if the rogue never arrived.
+        let action = servo.sample(1000.0, POLL_INTERVAL);
+        assert_eq!(servo.state(), ServoState::FrequencyLock);
+        assert!(matches!(action, ServoAction::AdjustFrequency { .. }));
+    }
+
+    #[test]
+    fn custom_panic_threshold_honored() {
+        // If a user sets a tighter panic threshold, it takes effect.
+        let mut servo = PiServo::new(ServoConfig {
+            step_threshold_ns: 100_000_000.0, // 100ms
+            panic_threshold_ns: 500_000_000.0, // 500ms
+            ..ServoConfig::default()
+        });
+        // 600ms is > 500ms panic threshold → reject.
+        let action = servo.sample(600_000_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Reject { .. }));
     }
 
     // ---------------------------------------------------------------

@@ -73,6 +73,14 @@ pub async fn run_clock_discipline(
                                 );
                             }
                         }
+                        ServoAction::Reject { offset_ns } => {
+                            warn!(
+                                "Refused implausible offset {} ns (panic threshold exceeded); \
+                                 clock NOT stepped. Check upstream time sources for spoofing, \
+                                 corruption, or NTP-era handling bugs.",
+                                offset_ns
+                            );
+                        }
                         ServoAction::None => {
                             debug!(
                                 "Servo warming up ({} samples), offset: {}",
