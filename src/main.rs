@@ -17,6 +17,8 @@ mod management;
 mod ntp_client;
 mod ntp_server;
 mod ptp_node;
+#[cfg(unix)]
+mod single_instance;
 
 #[derive(Parser)]
 #[command(name = "rtime", version, about = "rTime - NTP/PTP time synchronization service")]
@@ -139,6 +141,17 @@ async fn main() -> Result<()> {
         // Single-query mode: query a specific NTP server.
         run_single_query(server, cli.count).await
     } else {
+        // Daemon mode — refuse to start if another rtime instance already
+        // holds the lock. Skipped above for one-shot --server queries.
+        #[cfg(unix)]
+        let _instance_lock = match single_instance::acquire("rtime") {
+            Ok(lock) => lock,
+            Err(e) => {
+                eprintln!("rtime: {e}");
+                std::process::exit(1);
+            }
+        };
+
         // Daemon mode: load config and run the full daemon.
         let mut config = load_config(&cli.config)?;
         config.validate().context("configuration validation failed")?;
