@@ -141,14 +141,19 @@ async fn main() -> Result<()> {
         // Single-query mode: query a specific NTP server.
         run_single_query(server, cli.count).await
     } else {
-        // Daemon mode — refuse to start if another rtime instance already
-        // holds the lock. Skipped above for one-shot --server queries.
+        // Refuse to start when another instance actually holds the lock;
+        // warn and continue when the lockfile path isn't writable.
+        // Skipped above for one-shot --server queries.
         #[cfg(unix)]
         let _instance_lock = match single_instance::acquire("rtime") {
-            Ok(lock) => lock,
-            Err(e) => {
-                eprintln!("rtime: {e}");
+            Ok(lock) => Some(lock),
+            Err(single_instance::InstanceLockError::AlreadyRunning(pid)) => {
+                eprintln!("rtime: another instance is already running (pid {pid})");
                 std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("rtime: warning: singleton lock unavailable: {e} (continuing)");
+                None
             }
         };
 
