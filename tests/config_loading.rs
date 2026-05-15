@@ -129,7 +129,8 @@ fn defaults_for_missing_sections() {
     assert_eq!(config.general.log_level, "info");
     assert!(config.clock.discipline);
     assert_eq!(config.clock.step_threshold_ms, 128.0);
-    assert_eq!(config.clock.panic_threshold_ms, 1000.0);
+    assert_eq!(config.clock.panic_threshold_ms, 1_000_000.0);
+    assert!(config.clock.allow_initial_step);
     assert_eq!(config.clock.interface, "system");
     assert!(config.ntp.enabled);
     assert_eq!(config.ntp.listen, "127.0.0.1:123");

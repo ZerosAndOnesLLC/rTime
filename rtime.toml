@@ -4,7 +4,14 @@ log_level = "info"
 [clock]
 discipline = true
 step_threshold_ms = 128
-panic_threshold_ms = 1000
+# Offsets larger than this are refused outright in steady state. Default is
+# 1000 seconds — matches classic `ntpd`. Offsets larger than this on the very
+# first sample after start are handled by `allow_initial_step`.
+panic_threshold_ms = 1000000
+# Permit one unrestricted step the first time the servo sees a measurement.
+# Equivalent to `ntpd -g`. Lets the clock recover after a cold boot or long
+# VM suspend where real-world offset can exceed any sane steady-state guard.
+allow_initial_step = true
 interface = "system"
 
 [ntp]

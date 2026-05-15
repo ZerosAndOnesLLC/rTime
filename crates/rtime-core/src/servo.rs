@@ -46,6 +46,14 @@ pub struct ServoConfig {
     /// NTP reply rather than real drift. Must be greater than
     /// `step_threshold_ns`. Default: 1_000_000_000 (1s).
     pub panic_threshold_ns: f64,
+    /// Allow a single unrestricted step the first time the servo sees a
+    /// measurement, bypassing `panic_threshold_ns` on that first sample only.
+    /// Matches `ntpd -g` semantics: after a cold boot or long VM suspend the
+    /// real-world offset can legitimately exceed any sane steady-state panic
+    /// guard, and refusing to step would strand the clock forever. Once the
+    /// first step is performed, the panic clamp engages for all subsequent
+    /// samples. Default: true.
+    pub allow_initial_step: bool,
     /// Maximum frequency adjustment in PPM. Default: 500.0.
     pub max_frequency: f64,
     /// Number of initial samples to skip (for filter warmup). Default: 4.
@@ -59,6 +67,7 @@ impl Default for ServoConfig {
         Self {
             step_threshold_ns: 128_000_000.0,
             panic_threshold_ns: 1_000_000_000.0,
+            allow_initial_step: true,
             max_frequency: 500.0,
             init_samples: 4,
             fll_samples: 8,
@@ -82,6 +91,11 @@ pub struct PiServo {
     last_offset: Option<f64>,
     /// Number of samples processed.
     sample_count: u32,
+    /// Whether a Step has ever been performed by this servo instance. Used
+    /// together with `config.allow_initial_step` to permit one unrestricted
+    /// step at startup; subsequent samples are clamped by the panic threshold.
+    /// Not cleared by `reset()` — once we've stepped, we trust the clamp.
+    has_stepped: bool,
 }
 
 impl PiServo {
@@ -94,6 +108,7 @@ impl PiServo {
             frequency: 0.0,
             last_offset: None,
             sample_count: 0,
+            has_stepped: false,
         }
     }
 
@@ -130,7 +145,25 @@ impl PiServo {
         // a value this big means the measurement is corrupt, spoofed, or the
         // result of an NTP-era wrap. Stepping would wreck the clock (see the
         // year-9920 incident that motivated this guard).
+        //
+        // Exception: if `allow_initial_step` is set and we have never stepped,
+        // permit one unrestricted step. After a cold boot or long VM suspend
+        // the real-world offset can legitimately exceed any sane steady-state
+        // panic guard; without this bypass the clock is stranded forever.
+        // Equivalent to `ntpd -g`.
         if offset_ns.abs() > self.config.panic_threshold_ns {
+            if self.config.allow_initial_step && !self.has_stepped {
+                warn!(
+                    "Initial offset {:.0} ns exceeds panic threshold {:.0} ns; \
+                     performing one-shot startup step (allow_initial_step=true).",
+                    offset_ns, self.config.panic_threshold_ns
+                );
+                self.has_stepped = true;
+                self.reset();
+                return ServoAction::Step {
+                    offset_ns: offset_ns as i64,
+                };
+            }
             warn!(
                 "Rejecting implausible offset: {:.0} ns exceeds panic threshold {:.0} ns",
                 offset_ns, self.config.panic_threshold_ns
@@ -145,6 +178,7 @@ impl PiServo {
         // Step detection: if offset is larger than the threshold, step the clock
         // and reset state so the servo re-converges from scratch.
         if offset_ns.abs() > self.config.step_threshold_ns {
+            self.has_stepped = true;
             self.reset();
             return ServoAction::Step {
                 offset_ns: offset_ns as i64,
@@ -527,7 +561,12 @@ mod tests {
     // ---------------------------------------------------------------
     #[test]
     fn insanely_large_offset_rejected() {
-        let mut servo = default_servo();
+        // With the initial-step bypass disabled, a panic-exceeding offset must
+        // be rejected even on the very first sample.
+        let mut servo = PiServo::new(ServoConfig {
+            allow_initial_step: false,
+            ..ServoConfig::default()
+        });
         // 24 million seconds -- matches the kind of bogus step seen in the
         // year-9920 incident. Should Reject, not Step.
         let action = servo.sample(24_621_704_000_000_000.0, POLL_INTERVAL);
@@ -544,7 +583,10 @@ mod tests {
 
     #[test]
     fn negative_insanely_large_offset_rejected() {
-        let mut servo = default_servo();
+        let mut servo = PiServo::new(ServoConfig {
+            allow_initial_step: false,
+            ..ServoConfig::default()
+        });
         let action = servo.sample(-24_621_704_000_000_000.0, POLL_INTERVAL);
         assert!(matches!(action, ServoAction::Reject { .. }));
         assert_eq!(servo.sample_count(), 0);
@@ -563,8 +605,15 @@ mod tests {
     #[test]
     fn rejected_sample_does_not_disturb_convergence() {
         // A single rogue measurement should not reset an already-converging
-        // servo or consume an init slot.
-        let mut servo = servo_with_config(2, 4);
+        // servo or consume an init slot. The bypass is disabled here so we're
+        // exercising the steady-state panic path -- the bypass only ever fires
+        // before the first step, not in the middle of a converged session.
+        let mut servo = PiServo::new(ServoConfig {
+            init_samples: 2,
+            fll_samples: 4,
+            allow_initial_step: false,
+            ..ServoConfig::default()
+        });
         servo.sample(1000.0, POLL_INTERVAL); // init sample 1
         servo.sample(1000.0, POLL_INTERVAL); // init sample 2
 
@@ -587,10 +636,70 @@ mod tests {
         let mut servo = PiServo::new(ServoConfig {
             step_threshold_ns: 100_000_000.0, // 100ms
             panic_threshold_ns: 500_000_000.0, // 500ms
+            allow_initial_step: false,
             ..ServoConfig::default()
         });
         // 600ms is > 500ms panic threshold → reject.
         let action = servo.sample(600_000_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Reject { .. }));
+    }
+
+    // ---------------------------------------------------------------
+    // allow_initial_step: cold-boot bypass of the panic clamp
+    // ---------------------------------------------------------------
+    #[test]
+    fn initial_step_bypasses_panic_when_enabled() {
+        // Mirrors the real-world appliance case: VM suspended for ~47 min,
+        // measured offset ~2.84e12 ns, panic threshold 1s. Default config has
+        // allow_initial_step=true so the first sample must Step, not Reject.
+        let mut servo = default_servo();
+        let huge = 2_844_849_653_081.0;
+        let action = servo.sample(huge, POLL_INTERVAL);
+        match action {
+            ServoAction::Step { offset_ns } => {
+                assert_eq!(offset_ns, huge as i64);
+            }
+            other => panic!("expected Step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn initial_step_only_fires_once() {
+        // After the cold-boot bypass has fired, the panic clamp re-engages
+        // for all subsequent oversized samples.
+        let mut servo = default_servo();
+        // First huge offset: bypass fires, returns Step.
+        let action = servo.sample(2_844_849_653_081.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Step { .. }));
+        // Second huge offset: bypass already spent → Reject.
+        let action = servo.sample(2_844_849_653_081.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Reject { .. }));
+    }
+
+    #[test]
+    fn initial_step_bypass_disabled_rejects() {
+        // Opting out of the bypass restores the strict steady-state semantic
+        // (Reject even on first sample).
+        let mut servo = PiServo::new(ServoConfig {
+            allow_initial_step: false,
+            ..ServoConfig::default()
+        });
+        let action = servo.sample(2_844_849_653_081.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Reject { .. }));
+    }
+
+    #[test]
+    fn normal_step_also_arms_panic_clamp() {
+        // A normal in-threshold Step (e.g., legitimate drift recovery during
+        // steady state) also flips `has_stepped`, so a later huge measurement
+        // can't sneak through under the cold-boot bypass.
+        let mut servo = default_servo();
+        // 999ms is over the 128ms step threshold but under the 1s panic
+        // threshold → normal Step, has_stepped flips true.
+        let action = servo.sample(999_000_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Step { .. }));
+        // Now a huge offset should be Rejected, not Stepped via bypass.
+        let action = servo.sample(2_844_849_653_081.0, POLL_INTERVAL);
         assert!(matches!(action, ServoAction::Reject { .. }));
     }
 

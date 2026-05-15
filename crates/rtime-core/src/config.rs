@@ -42,6 +42,8 @@ pub struct ClockConfig {
     pub step_threshold_ms: f64,
     #[serde(default = "default_panic_threshold_ms")]
     pub panic_threshold_ms: f64,
+    #[serde(default = "default_true")]
+    pub allow_initial_step: bool,
     #[serde(default = "default_clock_interface")]
     pub interface: String,
 }
@@ -52,6 +54,7 @@ impl Default for ClockConfig {
             discipline: true,
             step_threshold_ms: default_step_threshold_ms(),
             panic_threshold_ms: default_panic_threshold_ms(),
+            allow_initial_step: true,
             interface: default_clock_interface(),
         }
     }
@@ -66,7 +69,12 @@ fn default_step_threshold_ms() -> f64 {
 }
 
 fn default_panic_threshold_ms() -> f64 {
-    1000.0
+    // 1000 seconds — matches the classic `ntpd` panic default. The previous
+    // value (1s) was a steady-state-tracking guard masquerading as the panic
+    // threshold; in practice it stranded clocks whenever a VM was suspended
+    // for longer than a second. The cold-boot bypass (`allow_initial_step`)
+    // still handles offsets larger than this on first sample.
+    1_000_000.0
 }
 
 fn default_clock_interface() -> String {
