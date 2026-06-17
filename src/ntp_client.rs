@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use anyhow::{Context, Result, bail};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use rtime_core::source::{SourceId, SourceMeasurement};
 use rtime_core::timestamp::NtpTimestamp;
@@ -135,7 +135,7 @@ pub async fn run_ntp_client(
                 query_count += 1;
             }
             Err(e) => {
-                error!("NTP query to {} failed: {}", server_addr, e);
+                warn!("NTP query to {} failed: {}", server_addr, e);
                 // Record a dropped packet on failure.
                 if metrics_enabled {
                     instruments::increment_ntp_packets_sent();

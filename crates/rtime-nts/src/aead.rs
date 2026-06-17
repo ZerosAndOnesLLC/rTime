@@ -150,7 +150,7 @@ fn decrypt_aes_siv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::RngCore;
+    use rand::Rng;
 
     fn random_key() -> [u8; AEAD_AES_SIV_CMAC_256_KEYLEN] {
         let mut key = [0u8; AEAD_AES_SIV_CMAC_256_KEYLEN];

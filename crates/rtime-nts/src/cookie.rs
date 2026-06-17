@@ -26,7 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::{Aead, KeyInit, Payload};
 use aes_siv::Aes128SivAead;
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Sha256, Digest};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -303,7 +303,7 @@ fn decrypt_cookie_data(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::RngCore;
+    use rand::Rng;
 
     fn random_key() -> [u8; AEAD_AES_SIV_CMAC_256_KEYLEN] {
         let mut key = [0u8; AEAD_AES_SIV_CMAC_256_KEYLEN];

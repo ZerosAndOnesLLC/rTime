@@ -344,7 +344,7 @@ pub fn generate_cookies(
 mod tests {
     use super::*;
     use crate::DEFAULT_COOKIE_COUNT;
-    use rand::RngCore;
+    use rand::Rng;
 
     fn random_key() -> [u8; AEAD_AES_SIV_CMAC_256_KEYLEN] {
         let mut key = [0u8; AEAD_AES_SIV_CMAC_256_KEYLEN];

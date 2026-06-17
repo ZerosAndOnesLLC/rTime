@@ -3,7 +3,7 @@
 //! Tests the complete NTS-KE handshake flow: record creation, parsing,
 //! key derivation, cookie management, and AEAD authentication.
 
-use rand::RngCore;
+use rand::Rng;
 use rtime_nts::aead::{NtsAead, SIV_TAG_SIZE};
 use rtime_nts::cookie::CookieJar;
 use rtime_nts::ke::{

@@ -96,7 +96,7 @@ async fn auth_middleware(
 
     match auth_header {
         Some(header) if header.starts_with("Bearer ") => {
-            let token = header[7..].as_bytes();
+            let token = &header.as_bytes()[7..];
             let expected = api_key.as_bytes();
             // Constant-time comparison to prevent timing side-channel attacks.
             // We first check length equality (which leaks length but not content),
