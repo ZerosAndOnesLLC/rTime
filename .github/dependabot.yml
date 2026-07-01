@@ -16,3 +16,6 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # The `@1.88` ref pins the MSRV toolchain, not an action version — do not bump it.
+      - dependency-name: "dtolnay/rust-toolchain"
