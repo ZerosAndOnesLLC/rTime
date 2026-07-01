@@ -5,9 +5,9 @@
 //! "256" refers to the output tag size (256 bits = 32 bytes), while
 //! internally it uses two 128-bit subkeys, totaling a 32-byte key.
 
+use aes_siv::Aes128SivAead;
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::{Aead, KeyInit, Payload};
-use aes_siv::Aes128SivAead;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{AEAD_AES_SIV_CMAC_256_KEYLEN, NtsError};
@@ -69,24 +69,44 @@ impl NtsAead {
     ///
     /// The nonce is combined with the AAD for the SIV construction.
     /// The returned ciphertext includes the SIV tag prepended (16 bytes + plaintext length).
-    pub fn encrypt_c2s(&self, nonce: &[u8], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, NtsError> {
+    pub fn encrypt_c2s(
+        &self,
+        nonce: &[u8],
+        plaintext: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, NtsError> {
         encrypt_aes_siv(&self.c2s_key, nonce, plaintext, aad)
     }
 
     /// Decrypt ciphertext with associated data in the server-to-client direction.
     ///
     /// The ciphertext must include the SIV tag prepended.
-    pub fn decrypt_s2c(&self, nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, NtsError> {
+    pub fn decrypt_s2c(
+        &self,
+        nonce: &[u8],
+        ciphertext: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, NtsError> {
         decrypt_aes_siv(&self.s2c_key, nonce, ciphertext, aad)
     }
 
     /// Encrypt plaintext with associated data in the server-to-client direction.
-    pub fn encrypt_s2c(&self, nonce: &[u8], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, NtsError> {
+    pub fn encrypt_s2c(
+        &self,
+        nonce: &[u8],
+        plaintext: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, NtsError> {
         encrypt_aes_siv(&self.s2c_key, nonce, plaintext, aad)
     }
 
     /// Decrypt ciphertext with associated data in the client-to-server direction.
-    pub fn decrypt_c2s(&self, nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, NtsError> {
+    pub fn decrypt_c2s(
+        &self,
+        nonce: &[u8],
+        ciphertext: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, NtsError> {
         decrypt_aes_siv(&self.c2s_key, nonce, ciphertext, aad)
     }
 }

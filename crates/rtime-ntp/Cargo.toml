@@ -2,9 +2,16 @@
 name = "rtime-ntp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "NTPv4 protocol implementation for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "NTPv4 (RFC 5905) protocol implementation: packet codec, client, server, poll control, and Kiss-o'-Death handling for the rTime daemon"
+documentation = "https://docs.rs/rtime-ntp"
+readme = "README.md"
+keywords = ["ntp", "ntpv4", "sntp", "time", "rfc5905"]
+categories = ["network-programming", "date-and-time", "parser-implementations"]
 
 [dependencies]
 rtime-core = { workspace = true }

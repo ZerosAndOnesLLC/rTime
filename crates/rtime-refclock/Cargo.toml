@@ -2,9 +2,16 @@
 name = "rtime-refclock"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Reference clock drivers (GPS/PPS) for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "Reference clock drivers (GPS/NMEA, PPS pulse-per-second) for the rTime NTP/PTP time synchronization daemon"
+documentation = "https://docs.rs/rtime-refclock"
+readme = "README.md"
+keywords = ["gps", "pps", "refclock", "time", "ntp"]
+categories = ["hardware-support", "date-and-time"]
 
 [dependencies]
 rtime-core = { workspace = true }

@@ -39,8 +39,8 @@ pub fn compute_e2e(
     t3: PtpTimestamp,
     t4: PtpTimestamp,
 ) -> (NtpDuration, NtpDuration) {
-    let forward = ptp_diff(t2, t1);  // T2 - T1
-    let reverse = ptp_diff(t4, t3);  // T4 - T3
+    let forward = ptp_diff(t2, t1); // T2 - T1
+    let reverse = ptp_diff(t4, t3); // T4 - T3
 
     let offset = (forward - reverse) / 2;
     let delay = (forward + reverse) / 2;

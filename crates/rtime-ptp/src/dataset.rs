@@ -38,8 +38,8 @@ impl DefaultDS {
             clock_identity,
             number_ports: 1,
             clock_quality: ClockQuality {
-                clock_class: 248, // Default: slave-only clock
-                clock_accuracy: 0xFE, // Unknown
+                clock_class: 248,                   // Default: slave-only clock
+                clock_accuracy: 0xFE,               // Unknown
                 offset_scaled_log_variance: 0xFFFF, // Maximum uncertainty
             },
             priority1: 128,

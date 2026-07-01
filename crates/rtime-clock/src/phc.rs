@@ -115,16 +115,13 @@ mod linux_phc {
 
         fn step(&self, offset: NtpDuration) -> Result<(), ClockError> {
             // Hold lock to prevent TOCTOU race in read-modify-write.
-            let _guard = self.discipline_lock.lock().map_err(|_| {
-                ClockError::Os(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "discipline lock poisoned",
-                ))
-            })?;
+            let _guard = self
+                .discipline_lock
+                .lock()
+                .map_err(|_| ClockError::Os(std::io::Error::other("discipline lock poisoned")))?;
 
             let clock = ClockId::from_raw(self.clockid);
-            let ts = nix::time::clock_gettime(clock)
-                .map_err(|e| ClockError::Os(e.into()))?;
+            let ts = nix::time::clock_gettime(clock).map_err(|e| ClockError::Os(e.into()))?;
 
             let nanos = offset.to_nanos();
             let total_ns = ts.tv_sec() as i64 * 1_000_000_000 + ts.tv_nsec() as i64 + nanos;
@@ -153,12 +150,10 @@ mod linux_phc {
         }
 
         fn adjust_frequency(&self, ppm: f64) -> Result<(), ClockError> {
-            let _guard = self.discipline_lock.lock().map_err(|_| {
-                ClockError::Os(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "discipline lock poisoned",
-                ))
-            })?;
+            let _guard = self
+                .discipline_lock
+                .lock()
+                .map_err(|_| ClockError::Os(std::io::Error::other("discipline lock poisoned")))?;
 
             // Use clock_adjtime to adjust the PHC frequency.
             let freq = (ppm * 65536.0) as i64;
@@ -180,8 +175,7 @@ mod linux_phc {
 
         fn frequency_offset(&self) -> Result<f64, ClockError> {
             let mut tx = crate::adjtime::Timex::new(); // modes = 0 => query
-            crate::adjtime::clock_adjtime(self.clockid, &mut tx)
-                .map_err(ClockError::Os)?;
+            crate::adjtime::clock_adjtime(self.clockid, &mut tx).map_err(ClockError::Os)?;
             Ok(tx.0.freq as f64 / 65536.0)
         }
 

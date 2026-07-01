@@ -3,19 +3,15 @@
 use rtime_core::clock::LeapIndicator;
 use rtime_core::timestamp::NtpTimestamp;
 use rtime_ntp::client;
-use rtime_ntp::packet::{NtpMode, NtpPacket, NTP_HEADER_SIZE};
-use rtime_ntp::server::{build_response, validate_request, ServerState};
+use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpMode, NtpPacket};
+use rtime_ntp::server::{ServerState, build_response, validate_request};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 
 /// Helper: start a minimal NTP server on the given socket that serves responses
 /// using the provided ServerState. Returns after processing `max_requests` packets.
-async fn serve_ntp(
-    socket: Arc<UdpSocket>,
-    state: Arc<RwLock<ServerState>>,
-    max_requests: usize,
-) {
+async fn serve_ntp(socket: Arc<UdpSocket>, state: Arc<RwLock<ServerState>>, max_requests: usize) {
     let mut buf = [0u8; 512];
     for _ in 0..max_requests {
         let (len, client_addr) = socket.recv_from(&mut buf).await.expect("server recv");
@@ -45,10 +41,7 @@ async fn serve_ntp(
 }
 
 /// Helper: send a client request and receive a response on the given socket.
-async fn query_once(
-    socket: &UdpSocket,
-    server_addr: std::net::SocketAddr,
-) -> client::NtpResult {
+async fn query_once(socket: &UdpSocket, server_addr: std::net::SocketAddr) -> client::NtpResult {
     let cookie = NtpTimestamp::now();
     let request = client::build_request(cookie);
     let request_bytes = request.serialize();
@@ -77,9 +70,7 @@ async fn query_once(
 #[tokio::test]
 async fn ntp_client_server_roundtrip() {
     // Set up a server on a high ephemeral port.
-    let server_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind server");
+    let server_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind server");
     let server_addr = server_socket.local_addr().expect("server addr");
     let server_socket = Arc::new(server_socket);
 
@@ -101,9 +92,7 @@ async fn ntp_client_server_roundtrip() {
     });
 
     // Client query.
-    let client_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind client");
+    let client_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind client");
     let result = query_once(&client_socket, server_addr).await;
 
     // Verify the response is sane.
@@ -135,9 +124,7 @@ async fn ntp_client_server_roundtrip() {
 
 #[tokio::test]
 async fn multiple_queries_consistent() {
-    let server_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind server");
+    let server_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind server");
     let server_addr = server_socket.local_addr().expect("server addr");
     let server_socket = Arc::new(server_socket);
 
@@ -160,9 +147,7 @@ async fn multiple_queries_consistent() {
         serve_ntp(srv_socket, srv_state, num_queries).await;
     });
 
-    let client_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind client");
+    let client_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind client");
 
     let mut offsets = Vec::new();
     for _ in 0..num_queries {
@@ -187,9 +172,7 @@ async fn multiple_queries_consistent() {
 
 #[tokio::test]
 async fn server_rejects_non_client_mode() {
-    let server_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind server");
+    let server_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind server");
     let server_addr = server_socket.local_addr().expect("server addr");
     let server_socket = Arc::new(server_socket);
 
@@ -203,9 +186,7 @@ async fn server_rejects_non_client_mode() {
     });
 
     // Send a packet with Server mode instead of Client mode.
-    let client_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind client");
+    let client_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind client");
 
     let mut bad_request = NtpPacket::new_client_request(NtpTimestamp::now());
     bad_request.mode = NtpMode::Server; // wrong mode
@@ -236,14 +217,10 @@ async fn server_rejects_non_client_mode() {
 async fn packet_serialize_roundtrip_on_wire() {
     // Verify that a packet serialized by the client, sent over UDP, and parsed
     // on the server side preserves all fields.
-    let server_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind server");
+    let server_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind server");
     let server_addr = server_socket.local_addr().expect("server addr");
 
-    let client_socket = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .expect("bind client");
+    let client_socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind client");
 
     let original_ts = NtpTimestamp::new(3_900_000_000, 12345);
     let request = NtpPacket::new_client_request(original_ts);

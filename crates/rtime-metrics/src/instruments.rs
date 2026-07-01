@@ -32,14 +32,12 @@ pub fn record_clock_stratum(stratum: u8) {
 
 /// Record the offset of a specific NTP source in seconds.
 pub fn record_ntp_source_offset(peer: &str, offset_seconds: f64) {
-    gauge!("rtime_ntp_source_offset_seconds", "peer" => peer.to_string())
-        .set(offset_seconds);
+    gauge!("rtime_ntp_source_offset_seconds", "peer" => peer.to_string()).set(offset_seconds);
 }
 
 /// Record the round-trip delay of a specific NTP source in seconds.
 pub fn record_ntp_source_delay(peer: &str, delay_seconds: f64) {
-    gauge!("rtime_ntp_source_delay_seconds", "peer" => peer.to_string())
-        .set(delay_seconds);
+    gauge!("rtime_ntp_source_delay_seconds", "peer" => peer.to_string()).set(delay_seconds);
 }
 
 // ─── NTP packets ───────────────────────────────────────────────────────────

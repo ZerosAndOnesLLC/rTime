@@ -202,9 +202,7 @@ impl PiServo {
         let active_samples = self.sample_count - self.config.init_samples;
 
         // Transition from FLL to PLL once we have enough FLL samples.
-        if self.state == ServoState::FrequencyLock
-            && active_samples > self.config.fll_samples
-        {
+        if self.state == ServoState::FrequencyLock && active_samples > self.config.fll_samples {
             self.state = ServoState::PhaseLock;
         }
 
@@ -634,7 +632,7 @@ mod tests {
     fn custom_panic_threshold_honored() {
         // If a user sets a tighter panic threshold, it takes effect.
         let mut servo = PiServo::new(ServoConfig {
-            step_threshold_ns: 100_000_000.0, // 100ms
+            step_threshold_ns: 100_000_000.0,  // 100ms
             panic_threshold_ns: 500_000_000.0, // 500ms
             allow_initial_step: false,
             ..ServoConfig::default()

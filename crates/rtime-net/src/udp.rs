@@ -69,10 +69,7 @@ impl TimestampedSocket {
     /// Returns a `ReceivedPacket` containing the data (truncated to actual
     /// received length), the sender's address, and the receive timestamp.
     /// The timestamp is taken as close to the actual receive as possible.
-    pub async fn recv_from(
-        &self,
-        buf: &mut [u8],
-    ) -> Result<ReceivedPacket, std::io::Error> {
+    pub async fn recv_from(&self, buf: &mut [u8]) -> Result<ReceivedPacket, std::io::Error> {
         let (len, addr) = self.inner.recv_from(buf).await?;
         let recv_time = NtpTimestamp::now();
         Ok(ReceivedPacket {
@@ -168,8 +165,7 @@ impl TimestampedSocket {
             | TimestampingFlag::SOF_TIMESTAMPING_RX_SOFTWARE
             | TimestampingFlag::SOF_TIMESTAMPING_SOFTWARE;
 
-        setsockopt(&self.inner, sockopt::Timestamping, &sw_flags)
-            .map_err(std::io::Error::from)?;
+        setsockopt(&self.inner, sockopt::Timestamping, &sw_flags).map_err(std::io::Error::from)?;
 
         self.mode = TimestampMode::Software;
         Ok(false)
@@ -256,10 +252,7 @@ mod tests {
         let addr = raw.local_addr().expect("raw local_addr");
 
         let wrapped = TimestampedSocket::from_socket(raw);
-        assert_eq!(
-            wrapped.local_addr().expect("wrapped local_addr"),
-            addr
-        );
+        assert_eq!(wrapped.local_addr().expect("wrapped local_addr"), addr);
     }
 
     #[tokio::test]
@@ -276,10 +269,7 @@ mod tests {
         // Send multiple packets and verify all arrive
         for i in 0u8..5 {
             let payload = [i; 48]; // NTP-sized packet
-            sender
-                .send_to(&payload, receiver_addr)
-                .await
-                .expect("send");
+            sender.send_to(&payload, receiver_addr).await.expect("send");
 
             let mut buf = [0u8; 1024];
             let pkt = receiver.recv_from(&mut buf).await.expect("recv");

@@ -65,7 +65,10 @@ fn five_sources_with_two_falsetickers() {
     );
 
     // System peer should be selected.
-    assert!(result.system_peer.is_some(), "system peer should be selected");
+    assert!(
+        result.system_peer.is_some(),
+        "system peer should be selected"
+    );
 
     // System offset should be near 10ms (the cluster center).
     let sys_offset_ms = result.system_offset.to_millis_f64();

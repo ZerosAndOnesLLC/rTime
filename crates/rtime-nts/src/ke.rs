@@ -208,10 +208,9 @@ pub fn parse_server_response(data: &[u8]) -> Result<ParsedKeResponse, NtsError> 
                 cookies.push(record.body.clone());
             }
             RecordType::NtpV4ServerNegotiation => {
-                server = Some(
-                    String::from_utf8(record.body.clone())
-                        .map_err(|_| NtsError::InvalidCookie("invalid server name UTF-8".to_string()))?,
-                );
+                server = Some(String::from_utf8(record.body.clone()).map_err(|_| {
+                    NtsError::InvalidCookie("invalid server name UTF-8".to_string())
+                })?);
             }
             RecordType::NtpV4PortNegotiation => {
                 if record.body.len() >= 2 {
@@ -361,10 +360,7 @@ mod tests {
 
     #[test]
     fn build_and_parse_server_response() {
-        let cookies = vec![
-            vec![1, 2, 3, 4],
-            vec![5, 6, 7, 8],
-        ];
+        let cookies = vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]];
         let data = build_server_response(
             AEAD_AES_SIV_CMAC_256,
             &cookies,
@@ -422,7 +418,13 @@ mod tests {
         let c2s = random_key();
         let s2c = random_key();
 
-        let cookies = generate_cookies(&jar, &c2s, &s2c, AEAD_AES_SIV_CMAC_256, DEFAULT_COOKIE_COUNT);
+        let cookies = generate_cookies(
+            &jar,
+            &c2s,
+            &s2c,
+            AEAD_AES_SIV_CMAC_256,
+            DEFAULT_COOKIE_COUNT,
+        );
         assert_eq!(cookies.len(), DEFAULT_COOKIE_COUNT);
 
         // Each cookie should decrypt to the same keys
@@ -507,8 +509,8 @@ mod tests {
         let parsed_req = parse_client_request(&client_request).unwrap();
 
         // 3. Server selects algorithm
-        let algorithm = select_algorithm(&parsed_req.algorithms)
-            .expect("should find supported algorithm");
+        let algorithm =
+            select_algorithm(&parsed_req.algorithms).expect("should find supported algorithm");
         assert_eq!(algorithm, AEAD_AES_SIV_CMAC_256);
 
         // 4. Both sides derive keys from TLS exporter

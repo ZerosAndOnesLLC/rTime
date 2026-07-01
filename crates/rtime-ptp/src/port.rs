@@ -71,7 +71,7 @@ impl Default for PortConfig {
             port_identity: PortIdentity::ZERO,
             domain_number: 0,
             log_announce_interval: 1,      // 2 seconds
-            announce_receipt_timeout: 3,    // 3 intervals
+            announce_receipt_timeout: 3,   // 3 intervals
             log_sync_interval: 0,          // 1 second
             log_min_delay_req_interval: 0, // 1 second
             two_step: true,
@@ -292,10 +292,7 @@ mod tests {
 
     #[test]
     fn disable_from_any_state() {
-        for initial_event in [
-            None,
-            Some(PortEvent::InitComplete),
-        ] {
+        for initial_event in [None, Some(PortEvent::InitComplete)] {
             let mut port = default_port();
             if let Some(evt) = initial_event {
                 port.handle_event(evt);

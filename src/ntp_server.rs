@@ -67,7 +67,8 @@ impl RateLimiter {
         });
 
         // Refill tokens based on elapsed time.
-        let elapsed = now.checked_duration_since(bucket.last_update)
+        let elapsed = now
+            .checked_duration_since(bucket.last_update)
             .unwrap_or_default()
             .as_secs_f64();
         bucket.tokens = (bucket.tokens + elapsed * max_rate).min(burst);
@@ -83,7 +84,8 @@ impl RateLimiter {
 
     /// Remove stale buckets that have not been updated since `older_than`.
     fn cleanup(&mut self, older_than: Instant) {
-        self.buckets.retain(|_, bucket| bucket.last_update > older_than);
+        self.buckets
+            .retain(|_, bucket| bucket.last_update > older_than);
     }
 }
 
@@ -138,11 +140,15 @@ pub async fn run_ntp_server(
     rate_limit: f64,
     rate_burst: u32,
 ) -> Result<()> {
-    let socket = UdpSocket::bind(listen_addr)
-        .await
-        .context(format!("failed to bind NTP server socket on {}", listen_addr))?;
+    let socket = UdpSocket::bind(listen_addr).await.context(format!(
+        "failed to bind NTP server socket on {}",
+        listen_addr
+    ))?;
 
-    info!("NTP server listening on {} (rate_limit={}/s, burst={})", listen_addr, rate_limit, rate_burst);
+    info!(
+        "NTP server listening on {} (rate_limit={}/s, burst={})",
+        listen_addr, rate_limit, rate_burst
+    );
 
     let mut buf = [0u8; 512];
     let mut rate_limiter = RateLimiter::new(rate_limit, rate_burst);

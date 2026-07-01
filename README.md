@@ -16,7 +16,17 @@ A high-performance NTP/PTP time synchronization service written in Rust. rTime i
 
 ## Quick Start
 
-### Build
+### Install from crates.io
+
+```bash
+cargo install rtimed
+```
+
+This installs the `rtime` binary. (The crate is published as `rtimed` because the
+`rtime` name on crates.io is taken by an unrelated project; the binary itself is still
+named `rtime`.)
+
+### Build from source
 
 ```bash
 cargo build --release
@@ -178,6 +188,24 @@ rtime (binary)
 
 The daemon runs on Tokio's multi-threaded async runtime. Each upstream NTP source gets its own client task. Measurements are sent through an MPSC channel to the selection loop, which runs Marzullo's intersection algorithm to identify truechimers, select a system peer, and compute a system offset. That offset is forwarded via a watch channel to the clock discipline task, which applies PI-controlled slew or step corrections to the system clock.
 
+## Crates
+
+rTime is a Cargo workspace. The daemon ships as the `rtimed` crate, and its building
+blocks are published as reusable library crates:
+
+| Crate | Description |
+|-------|-------------|
+| [`rtimed`](https://crates.io/crates/rtimed) | The daemon (installs the `rtime` binary) |
+| [`rtime-core`](https://crates.io/crates/rtime-core) | Core types, config, and clock algorithms (Marzullo, PI servo) |
+| [`rtime-ntp`](https://crates.io/crates/rtime-ntp) | NTPv4 (RFC 5905) packet codec, client, and server |
+| [`rtime-nts`](https://crates.io/crates/rtime-nts) | Network Time Security (NTS, RFC 8915) |
+| [`rtime-ptp`](https://crates.io/crates/rtime-ptp) | PTP / IEEE 1588 protocol |
+| [`rtime-clock`](https://crates.io/crates/rtime-clock) | System clock interfaces (adjtime/adjtimex, PHC) |
+| [`rtime-net`](https://crates.io/crates/rtime-net) | Network I/O with packet timestamping |
+| [`rtime-refclock`](https://crates.io/crates/rtime-refclock) | Reference clock drivers (GPS, PPS) |
+| [`rtime-metrics`](https://crates.io/crates/rtime-metrics) | Prometheus metrics exporter |
+
 ## License
 
 MIT
+

@@ -165,7 +165,7 @@ impl ExtensionField {
 
     /// Parse all extension fields from the given data.
     ///
-    /// Limited to [`MAX_EXTENSION_FIELDS`] fields to prevent memory
+    /// Limited to `MAX_EXTENSION_FIELDS` fields to prevent memory
     /// amplification from crafted packets.
     pub fn parse_all(data: &[u8]) -> Result<Vec<Self>, ExtensionError> {
         let mut fields = Vec::new();

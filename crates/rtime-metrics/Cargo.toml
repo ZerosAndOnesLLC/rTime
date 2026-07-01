@@ -2,9 +2,16 @@
 name = "rtime-metrics"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Prometheus metrics exporter for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "Prometheus metrics exporter and instruments for the rTime NTP/PTP time synchronization daemon"
+documentation = "https://docs.rs/rtime-metrics"
+readme = "README.md"
+keywords = ["prometheus", "metrics", "ntp", "monitoring", "time"]
+categories = ["network-programming", "date-and-time"]
 
 [dependencies]
 rtime-core = { workspace = true }

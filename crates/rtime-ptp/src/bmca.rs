@@ -59,11 +59,7 @@ pub fn compare_announce(this: &AnnounceBody, other: &AnnounceBody) -> BmcaResult
     match this
         .grandmaster_clock_quality
         .offset_scaled_log_variance
-        .cmp(
-            &other
-                .grandmaster_clock_quality
-                .offset_scaled_log_variance,
-        )
+        .cmp(&other.grandmaster_clock_quality.offset_scaled_log_variance)
     {
         std::cmp::Ordering::Less => return BmcaResult::ThisBetter,
         std::cmp::Ordering::Greater => return BmcaResult::OtherBetter,
@@ -71,20 +67,14 @@ pub fn compare_announce(this: &AnnounceBody, other: &AnnounceBody) -> BmcaResult
     }
 
     // 5. Priority2
-    match this
-        .grandmaster_priority2
-        .cmp(&other.grandmaster_priority2)
-    {
+    match this.grandmaster_priority2.cmp(&other.grandmaster_priority2) {
         std::cmp::Ordering::Less => return BmcaResult::ThisBetter,
         std::cmp::Ordering::Greater => return BmcaResult::OtherBetter,
         std::cmp::Ordering::Equal => {}
     }
 
     // 6. Clock identity (tiebreaker)
-    match this
-        .grandmaster_identity
-        .cmp(&other.grandmaster_identity)
-    {
+    match this.grandmaster_identity.cmp(&other.grandmaster_identity) {
         std::cmp::Ordering::Less => BmcaResult::ThisBetter,
         std::cmp::Ordering::Greater => BmcaResult::OtherBetter,
         std::cmp::Ordering::Equal => BmcaResult::Equal,

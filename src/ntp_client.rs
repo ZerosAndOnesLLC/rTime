@@ -55,7 +55,9 @@ pub async fn run_ntp_client(
 
     info!(
         "NTP client started for {} (poll interval: {}s-{}s)",
-        server_addr, 1u64 << (min_poll as u32), 1u64 << (max_poll as u32),
+        server_addr,
+        1u64 << (min_poll as u32),
+        1u64 << (max_poll as u32),
     );
 
     let mut query_count: u64 = 0;
@@ -162,10 +164,7 @@ pub async fn run_ntp_client(
 }
 
 /// Perform a single async NTP query against the given server.
-async fn query_server(
-    socket: &UdpSocket,
-    addr: SocketAddr,
-) -> Result<client::NtpResult> {
+async fn query_server(socket: &UdpSocket, addr: SocketAddr) -> Result<client::NtpResult> {
     // Use a random-ish cookie (current time) for origin matching.
     let cookie = NtpTimestamp::now();
     let request = client::build_request(cookie);

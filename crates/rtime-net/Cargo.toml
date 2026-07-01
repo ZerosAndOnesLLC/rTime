@@ -2,9 +2,16 @@
 name = "rtime-net"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Network I/O with timestamping for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "Network I/O with software/hardware packet timestamping, multicast, and interface helpers for the rTime NTP/PTP daemon"
+documentation = "https://docs.rs/rtime-net"
+readme = "README.md"
+keywords = ["ntp", "udp", "timestamping", "network", "socket"]
+categories = ["network-programming", "os::unix-apis"]
 
 [dependencies]
 rtime-core = { workspace = true }

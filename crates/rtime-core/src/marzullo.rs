@@ -73,11 +73,13 @@ pub fn intersect(measurements: &[SourceMeasurement]) -> IntersectionResult {
     // Sort by value; break ties with Low before High so a point exactly at
     // a boundary is counted as inside.
     endpoints.sort_by(|a, b| {
-        a.value.cmp(&b.value).then_with(|| match (&a.kind, &b.kind) {
-            (EndpointType::Low, EndpointType::High) => std::cmp::Ordering::Less,
-            (EndpointType::High, EndpointType::Low) => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
-        })
+        a.value
+            .cmp(&b.value)
+            .then_with(|| match (&a.kind, &b.kind) {
+                (EndpointType::Low, EndpointType::High) => std::cmp::Ordering::Less,
+                (EndpointType::High, EndpointType::Low) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            })
     });
 
     // Try increasing numbers of allowed falsetickers.

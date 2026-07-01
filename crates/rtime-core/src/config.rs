@@ -277,12 +277,10 @@ impl RtimeConfig {
             ));
         }
         if self.clock.step_threshold_ms >= self.clock.panic_threshold_ms {
-            return Err(ConfigError::InvalidValue(
-                format!(
-                    "clock.step_threshold_ms ({}) must be less than clock.panic_threshold_ms ({})",
-                    self.clock.step_threshold_ms, self.clock.panic_threshold_ms
-                ),
-            ));
+            return Err(ConfigError::InvalidValue(format!(
+                "clock.step_threshold_ms ({}) must be less than clock.panic_threshold_ms ({})",
+                self.clock.step_threshold_ms, self.clock.panic_threshold_ms
+            )));
         }
 
         // Rate limiting values
@@ -300,49 +298,68 @@ impl RtimeConfig {
         // Validate poll intervals for each source
         for (i, source) in self.ntp.sources.iter().enumerate() {
             if source.min_poll < 0 || source.min_poll > 17 {
-                return Err(ConfigError::InvalidValue(
-                    format!("ntp.sources[{}].min_poll must be between 0 and 17", i),
-                ));
+                return Err(ConfigError::InvalidValue(format!(
+                    "ntp.sources[{}].min_poll must be between 0 and 17",
+                    i
+                )));
             }
             if source.max_poll < 0 || source.max_poll > 17 {
-                return Err(ConfigError::InvalidValue(
-                    format!("ntp.sources[{}].max_poll must be between 0 and 17", i),
-                ));
+                return Err(ConfigError::InvalidValue(format!(
+                    "ntp.sources[{}].max_poll must be between 0 and 17",
+                    i
+                )));
             }
             if source.min_poll > source.max_poll {
-                return Err(ConfigError::InvalidValue(
-                    format!("ntp.sources[{}].min_poll must be <= max_poll", i),
-                ));
+                return Err(ConfigError::InvalidValue(format!(
+                    "ntp.sources[{}].min_poll must be <= max_poll",
+                    i
+                )));
             }
         }
 
         // Validate listen addresses are parseable
-        self.ntp.listen.parse::<std::net::SocketAddr>().map_err(|_| {
-            ConfigError::InvalidValue(format!("invalid ntp.listen address: {}", self.ntp.listen))
-        })?;
-        if self.metrics.enabled {
-            self.metrics.listen.parse::<std::net::SocketAddr>().map_err(|_| {
+        self.ntp
+            .listen
+            .parse::<std::net::SocketAddr>()
+            .map_err(|_| {
                 ConfigError::InvalidValue(format!(
-                    "invalid metrics.listen address: {}",
-                    self.metrics.listen
+                    "invalid ntp.listen address: {}",
+                    self.ntp.listen
                 ))
             })?;
+        if self.metrics.enabled {
+            self.metrics
+                .listen
+                .parse::<std::net::SocketAddr>()
+                .map_err(|_| {
+                    ConfigError::InvalidValue(format!(
+                        "invalid metrics.listen address: {}",
+                        self.metrics.listen
+                    ))
+                })?;
         }
         if self.management.enabled {
-            self.management.listen.parse::<std::net::SocketAddr>().map_err(|_| {
-                ConfigError::InvalidValue(format!(
-                    "invalid management.listen address: {}",
-                    self.management.listen
-                ))
-            })?;
+            self.management
+                .listen
+                .parse::<std::net::SocketAddr>()
+                .map_err(|_| {
+                    ConfigError::InvalidValue(format!(
+                        "invalid management.listen address: {}",
+                        self.management.listen
+                    ))
+                })?;
         }
         if self.ntp.nts.enabled {
-            self.ntp.nts.ke_listen.parse::<std::net::SocketAddr>().map_err(|_| {
-                ConfigError::InvalidValue(format!(
-                    "invalid nts.ke_listen address: {}",
-                    self.ntp.nts.ke_listen
-                ))
-            })?;
+            self.ntp
+                .nts
+                .ke_listen
+                .parse::<std::net::SocketAddr>()
+                .map_err(|_| {
+                    ConfigError::InvalidValue(format!(
+                        "invalid nts.ke_listen address: {}",
+                        self.ntp.nts.ke_listen
+                    ))
+                })?;
 
             // Validate certificate and key files exist and are not world-readable
             let cert_path = self.ntp.nts.certificate.as_deref().ok_or_else(|| {
@@ -351,58 +368,71 @@ impl RtimeConfig {
             let key_path = self.ntp.nts.private_key.as_deref().ok_or_else(|| {
                 ConfigError::InvalidValue("nts.private_key is required when NTS is enabled".into())
             })?;
-            for (label, path) in [("nts.certificate", cert_path), ("nts.private_key", key_path)] {
+            for (label, path) in [
+                ("nts.certificate", cert_path),
+                ("nts.private_key", key_path),
+            ] {
                 let meta = std::fs::metadata(path).map_err(|e| {
                     ConfigError::InvalidValue(format!("{} file '{}': {}", label, path, e))
                 })?;
                 if !meta.is_file() {
-                    return Err(ConfigError::InvalidValue(
-                        format!("{} path '{}' is not a regular file", label, path),
-                    ));
+                    return Err(ConfigError::InvalidValue(format!(
+                        "{} path '{}' is not a regular file",
+                        label, path
+                    )));
                 }
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     let mode = meta.permissions().mode();
                     if mode & 0o004 != 0 {
-                        return Err(ConfigError::InvalidValue(
-                            format!("{} file '{}' is world-readable (mode {:o}); tighten permissions", label, path, mode),
-                        ));
+                        return Err(ConfigError::InvalidValue(format!(
+                            "{} file '{}' is world-readable (mode {:o}); tighten permissions",
+                            label, path, mode
+                        )));
                     }
                 }
             }
         }
 
         // Reject empty or whitespace-only API keys
-        if self.management.api_key.as_ref().is_some_and(|k| k.trim().is_empty()) {
+        if self
+            .management
+            .api_key
+            .as_ref()
+            .is_some_and(|k| k.trim().is_empty())
+        {
             return Err(ConfigError::InvalidValue(
                 "management.api_key must not be empty or whitespace-only".into(),
             ));
         }
 
         // Non-loopback management/metrics checks
-        let mgmt_addr: std::net::SocketAddr = self.management.listen.parse().unwrap_or_else(|_| {
-            "127.0.0.1:9200".parse().unwrap()
-        });
-        if self.management.enabled && !mgmt_addr.ip().is_loopback() && self.management.api_key.is_none() {
-            return Err(ConfigError::InvalidValue(
-                format!(
-                    "management API on non-loopback address {} requires api_key to be set",
-                    self.management.listen
-                ),
-            ));
+        let mgmt_addr: std::net::SocketAddr = self
+            .management
+            .listen
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:9200".parse().unwrap());
+        if self.management.enabled
+            && !mgmt_addr.ip().is_loopback()
+            && self.management.api_key.is_none()
+        {
+            return Err(ConfigError::InvalidValue(format!(
+                "management API on non-loopback address {} requires api_key to be set",
+                self.management.listen
+            )));
         }
 
-        let metrics_addr: std::net::SocketAddr = self.metrics.listen.parse().unwrap_or_else(|_| {
-            "127.0.0.1:9100".parse().unwrap()
-        });
+        let metrics_addr: std::net::SocketAddr = self
+            .metrics
+            .listen
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:9100".parse().unwrap());
         if self.metrics.enabled && !metrics_addr.ip().is_loopback() {
-            return Err(ConfigError::InvalidValue(
-                format!(
-                    "metrics endpoint on non-loopback address {} is not allowed (bind to loopback or use a reverse proxy)",
-                    self.metrics.listen
-                ),
-            ));
+            return Err(ConfigError::InvalidValue(format!(
+                "metrics endpoint on non-loopback address {} is not allowed (bind to loopback or use a reverse proxy)",
+                self.metrics.listen
+            )));
         }
 
         Ok(())

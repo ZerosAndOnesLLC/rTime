@@ -28,8 +28,7 @@ impl NtpTimestamp {
     pub fn from_system_time(time: SystemTime) -> Self {
         let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
         let ntp_seconds = duration.as_secs() + NTP_UNIX_EPOCH_DIFF;
-        let fraction =
-            ((duration.subsec_nanos() as u64) << 32) / 1_000_000_000;
+        let fraction = ((duration.subsec_nanos() as u64) << 32) / 1_000_000_000;
         Self::new(ntp_seconds as u32, fraction as u32)
     }
 
@@ -133,8 +132,7 @@ impl PtpTimestamp {
         let mut sec_buf = [0u8; 8];
         sec_buf[2..8].copy_from_slice(&bytes[0..6]);
         let seconds = u64::from_be_bytes(sec_buf);
-        let nanoseconds =
-            u32::from_be_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
+        let nanoseconds = u32::from_be_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
         Self {
             seconds,
             nanoseconds,

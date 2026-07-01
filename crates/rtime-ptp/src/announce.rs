@@ -78,9 +78,10 @@ impl ForeignMasterTable {
         announce: AnnounceBody,
         now: Instant,
     ) -> bool {
-        let record = self.records.entry(source).or_insert_with(|| {
-            ForeignMasterRecord::new(source, announce.clone())
-        });
+        let record = self
+            .records
+            .entry(source)
+            .or_insert_with(|| ForeignMasterRecord::new(source, announce.clone()));
 
         // Update the announce body to the latest
         record.announce = announce;

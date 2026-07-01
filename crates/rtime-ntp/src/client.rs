@@ -213,6 +213,9 @@ mod tests {
             NtpTimestamp::new(1000, 0),
             cookie,
         );
-        assert!(matches!(result, Err(ClientError::KissOfDeath(KissCode::Rate))));
+        assert!(matches!(
+            result,
+            Err(ClientError::KissOfDeath(KissCode::Rate))
+        ));
     }
 }

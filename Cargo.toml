@@ -13,25 +13,27 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.13.1"
+version = "0.14.0"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT"
 authors = ["Zeros And Ones LLC"]
 repository = "https://github.com/ZerosAndOnesLLC/rTime"
+homepage = "https://github.com/ZerosAndOnesLLC/rTime"
 
 [workspace.dependencies]
 # Constant-time comparison
 subtle = "2"
 
-# Internal crates
-rtime-core = { path = "crates/rtime-core" }
-rtime-ntp = { path = "crates/rtime-ntp" }
-rtime-nts = { path = "crates/rtime-nts" }
-rtime-ptp = { path = "crates/rtime-ptp" }
-rtime-clock = { path = "crates/rtime-clock" }
-rtime-net = { path = "crates/rtime-net" }
-rtime-refclock = { path = "crates/rtime-refclock" }
-rtime-metrics = { path = "crates/rtime-metrics" }
+# Internal crates (version pins are required so path deps resolve on crates.io)
+rtime-core = { path = "crates/rtime-core", version = "0.14.0" }
+rtime-ntp = { path = "crates/rtime-ntp", version = "0.14.0" }
+rtime-nts = { path = "crates/rtime-nts", version = "0.14.0" }
+rtime-ptp = { path = "crates/rtime-ptp", version = "0.14.0" }
+rtime-clock = { path = "crates/rtime-clock", version = "0.14.0" }
+rtime-net = { path = "crates/rtime-net", version = "0.14.0" }
+rtime-refclock = { path = "crates/rtime-refclock", version = "0.14.0" }
+rtime-metrics = { path = "crates/rtime-metrics", version = "0.14.0" }
 
 # Async
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "signal", "macros"] }
@@ -67,11 +69,23 @@ metrics = "0.24"
 metrics-exporter-prometheus = "0.18"
 
 [package]
-name = "rtime"
+name = "rtimed"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "High-performance NTP/PTP time synchronization daemon (NTPv4, NTS, PTP). Installs as the `rtime` binary."
+documentation = "https://docs.rs/rtimed"
+readme = "README.md"
+keywords = ["ntp", "ptp", "nts", "ntpd", "time"]
+categories = ["command-line-utilities", "network-programming", "date-and-time"]
+
+[[bin]]
+name = "rtime"
+path = "src/main.rs"
 
 [dependencies]
 rtime-core = { workspace = true }

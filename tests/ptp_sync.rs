@@ -4,10 +4,10 @@
 //! Sync -> FollowUp -> DelayReq -> DelayResp, plus BMCA comparison.
 
 use rtime_core::timestamp::PtpTimestamp;
-use rtime_ptp::bmca::{compare_announce, select_best_master, BmcaResult};
-use rtime_ptp::delay::{compute_e2e, E2eDelayState};
+use rtime_ptp::bmca::{BmcaResult, compare_announce, select_best_master};
+use rtime_ptp::delay::{E2eDelayState, compute_e2e};
 use rtime_ptp::message::{
-    AnnounceBody, ClockQuality, MessageType, PtpFlags, PtpHeader, PtpMessage, PortIdentity,
+    AnnounceBody, ClockQuality, MessageType, PortIdentity, PtpFlags, PtpHeader, PtpMessage,
 };
 
 fn master_port() -> PortIdentity {

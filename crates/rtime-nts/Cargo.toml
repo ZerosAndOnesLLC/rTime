@@ -2,9 +2,16 @@
 name = "rtime-nts"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Network Time Security (NTS) for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "Network Time Security (NTS, RFC 8915): NTS-KE handshake, AEAD_AES_SIV_CMAC_256, and cookie handling for the rTime NTP daemon"
+documentation = "https://docs.rs/rtime-nts"
+readme = "README.md"
+keywords = ["nts", "ntp", "security", "tls", "rfc8915"]
+categories = ["cryptography", "network-programming", "date-and-time"]
 
 [dependencies]
 rtime-core = { workspace = true }

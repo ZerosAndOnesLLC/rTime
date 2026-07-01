@@ -30,10 +30,13 @@ pub fn join_multicast(
     multicast_addr: Ipv4Addr,
     interface: Ipv4Addr,
 ) -> std::io::Result<()> {
-    let interface_opt = if interface.is_unspecified() { None } else { Some(interface) };
+    let interface_opt = if interface.is_unspecified() {
+        None
+    } else {
+        Some(interface)
+    };
     let mreq = IpMembershipRequest::new(multicast_addr, interface_opt);
-    setsockopt(socket, sockopt::IpAddMembership, &mreq)
-        .map_err(std::io::Error::from)
+    setsockopt(socket, sockopt::IpAddMembership, &mreq).map_err(std::io::Error::from)
 }
 
 /// Leave a multicast group on the given interface.
@@ -44,19 +47,19 @@ pub fn leave_multicast(
     multicast_addr: Ipv4Addr,
     interface: Ipv4Addr,
 ) -> std::io::Result<()> {
-    let interface_opt = if interface.is_unspecified() { None } else { Some(interface) };
+    let interface_opt = if interface.is_unspecified() {
+        None
+    } else {
+        Some(interface)
+    };
     let mreq = IpMembershipRequest::new(multicast_addr, interface_opt);
-    setsockopt(socket, sockopt::IpDropMembership, &mreq)
-        .map_err(std::io::Error::from)
+    setsockopt(socket, sockopt::IpDropMembership, &mreq).map_err(std::io::Error::from)
 }
 
 /// Set the outgoing multicast interface for the socket.
 ///
 /// This controls which local interface is used for sending multicast packets.
-pub fn set_multicast_interface(
-    socket: &UdpSocket,
-    interface: Ipv4Addr,
-) -> std::io::Result<()> {
+pub fn set_multicast_interface(socket: &UdpSocket, interface: Ipv4Addr) -> std::io::Result<()> {
     // nix 0.29 does not expose IP_MULTICAST_IF as a typed sockopt; fall back to libc.
     let addr = libc::in_addr {
         s_addr: u32::from_ne_bytes(interface.octets()),
@@ -86,8 +89,7 @@ pub fn set_multicast_interface(
 /// to receivers on the same host. This is typically desired for PTP to avoid
 /// processing our own messages.
 pub fn set_multicast_loopback(socket: &UdpSocket, enabled: bool) -> std::io::Result<()> {
-    setsockopt(socket, sockopt::IpMulticastLoop, &enabled)
-        .map_err(std::io::Error::from)
+    setsockopt(socket, sockopt::IpMulticastLoop, &enabled).map_err(std::io::Error::from)
 }
 
 /// Set the multicast TTL (time-to-live / hop limit).
@@ -95,8 +97,7 @@ pub fn set_multicast_loopback(socket: &UdpSocket, enabled: bool) -> std::io::Res
 /// PTP typically uses TTL=1 for link-local multicast (peer delay)
 /// and TTL=128 for domain-scoped multicast.
 pub fn set_multicast_ttl(socket: &UdpSocket, ttl: u8) -> std::io::Result<()> {
-    setsockopt(socket, sockopt::IpMulticastTtl, &ttl)
-        .map_err(std::io::Error::from)
+    setsockopt(socket, sockopt::IpMulticastTtl, &ttl).map_err(std::io::Error::from)
 }
 
 #[cfg(test)]

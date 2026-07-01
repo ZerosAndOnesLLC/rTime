@@ -1,3 +1,20 @@
+//! Network Time Security (NTS, [RFC 8915](https://www.rfc-editor.org/rfc/rfc8915)) for the
+//! [rTime](https://github.com/ZerosAndOnesLLC/rTime) NTP daemon.
+//!
+//! NTS adds authentication and replay protection to NTPv4 without per-packet asymmetric
+//! crypto: a TLS 1.3 handshake (NTS-KE) establishes keys and issues opaque cookies, and each
+//! subsequent NTP exchange is protected with AEAD (`AEAD_AES_SIV_CMAC_256`).
+//!
+//! # Modules
+//!
+//! - [`ke`] — the NTS-KE (key establishment) record exchange over TLS.
+//! - [`records`] — NTS-KE record framing and parsing.
+//! - [`aead`] — AEAD encryption/decryption of NTP extension fields.
+//! - [`cookie`] — cookie issuance, storage, and rotation.
+//!
+//! Protocol constants (algorithm ids, ports, key lengths) and the crate error type
+//! [`NtsError`] are defined at the crate root.
+
 pub mod aead;
 pub mod cookie;
 pub mod ke;

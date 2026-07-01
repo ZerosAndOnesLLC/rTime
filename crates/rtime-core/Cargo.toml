@@ -2,9 +2,16 @@
 name = "rtime-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Core types, traits, and algorithms for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "Core types, clock algorithms (Marzullo source selection, PI servo, clock filter), and configuration for the rTime NTP/PTP time synchronization daemon"
+documentation = "https://docs.rs/rtime-core"
+readme = "README.md"
+keywords = ["ntp", "ptp", "time", "clock", "timekeeping"]
+categories = ["date-and-time", "network-programming"]
 
 [dependencies]
 thiserror = { workspace = true }

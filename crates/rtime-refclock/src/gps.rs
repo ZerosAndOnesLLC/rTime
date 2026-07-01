@@ -124,10 +124,7 @@ pub fn parse_gprmc(sentence: &str) -> Result<GpsFix, RefClockError> {
     }
 
     // Strip checksum portion for field parsing.
-    let data = sentence
-        .trim()
-        .strip_prefix('$')
-        .unwrap_or(sentence.trim());
+    let data = sentence.trim().strip_prefix('$').unwrap_or(sentence.trim());
     let data = data.split('*').next().unwrap_or(data);
 
     let fields: Vec<&str> = data.split(',').collect();
@@ -169,10 +166,7 @@ pub fn parse_gpzda(sentence: &str) -> Result<GpsFix, RefClockError> {
         ));
     }
 
-    let data = sentence
-        .trim()
-        .strip_prefix('$')
-        .unwrap_or(sentence.trim());
+    let data = sentence.trim().strip_prefix('$').unwrap_or(sentence.trim());
     let data = data.split('*').next().unwrap_or(data);
 
     let fields: Vec<&str> = data.split(',').collect();
@@ -358,14 +352,16 @@ mod tests {
 
     #[test]
     fn test_validate_checksum_valid() {
-        let sentence = make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+        let sentence =
+            make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
         assert!(validate_checksum(&sentence));
     }
 
     #[test]
     fn test_validate_checksum_invalid() {
         // Take a valid sentence and corrupt the checksum.
-        let sentence = make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+        let sentence =
+            make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
         let corrupted = format!("{}FF", &sentence[..sentence.len() - 2]);
         assert!(!validate_checksum(&corrupted));
     }
@@ -377,7 +373,8 @@ mod tests {
 
     #[test]
     fn test_parse_gprmc() {
-        let sentence = make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+        let sentence =
+            make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
         let fix = parse_gprmc(&sentence).unwrap();
         assert_eq!(fix.hours, 12);
         assert_eq!(fix.minutes, 35);
@@ -520,7 +517,8 @@ mod tests {
     #[test]
     fn test_gps_driver_process_line_rmc() {
         let driver = GpsDriver::new("/dev/ttyUSB0");
-        let sentence = make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+        let sentence =
+            make_nmea("GPRMC,123519.00,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
         let recv_time = NtpTimestamp::now();
         let measurement = driver.process_line(&sentence, recv_time);
         assert!(measurement.is_some());

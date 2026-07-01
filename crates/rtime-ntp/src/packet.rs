@@ -86,7 +86,7 @@ impl NtpPacket {
             version: NTP_VERSION,
             mode: NtpMode::Client,
             stratum: 0,
-            poll: 6, // 64 seconds default
+            poll: 6,        // 64 seconds default
             precision: -20, // ~1 microsecond
             root_delay: 0,
             root_dispersion: 0,
@@ -208,7 +208,7 @@ mod tests {
             stratum: 2,
             poll: 6,
             precision: -20,
-            root_delay: 0x0100_0000, // 1 second in NTP short format
+            root_delay: 0x0100_0000,      // 1 second in NTP short format
             root_dispersion: 0x0080_0000, // 0.5 seconds
             reference_id: u32::from_be_bytes(*b"GPS\0"),
             reference_ts: NtpTimestamp::new(3_900_000_000, 500),

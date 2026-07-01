@@ -20,14 +20,12 @@ use rtime_core::config::PtpConfig;
 use rtime_core::source::{SourceId, SourceMeasurement};
 use rtime_core::timestamp::{NtpDuration, NtpTimestamp, PtpTimestamp};
 use rtime_net::multicast::{
-    PTP_EVENT_PORT, PTP_GENERAL_PORT, PTP_PRIMARY_MULTICAST_V4,
-    join_multicast, set_multicast_interface, set_multicast_loopback, set_multicast_ttl,
+    PTP_EVENT_PORT, PTP_GENERAL_PORT, PTP_PRIMARY_MULTICAST_V4, join_multicast,
+    set_multicast_interface, set_multicast_loopback, set_multicast_ttl,
 };
 use rtime_ptp::announce::ForeignMasterTable;
 use rtime_ptp::delay::E2eDelayState;
-use rtime_ptp::message::{
-    MessageType, PtpFlags, PtpHeader, PtpMessage, PortIdentity,
-};
+use rtime_ptp::message::{MessageType, PortIdentity, PtpFlags, PtpHeader, PtpMessage};
 
 /// Maximum PTP packet size we expect to receive.
 const PTP_MAX_PACKET_SIZE: usize = 1500;
@@ -101,8 +99,14 @@ pub async fn run_ptp_node(
         config.domain,
         config.interface,
         interface_addr,
-        our_identity[0], our_identity[1], our_identity[2], our_identity[3],
-        our_identity[4], our_identity[5], our_identity[6], our_identity[7],
+        our_identity[0],
+        our_identity[1],
+        our_identity[2],
+        our_identity[3],
+        our_identity[4],
+        our_identity[5],
+        our_identity[6],
+        our_identity[7],
     );
 
     // Bind the event socket (port 319) for Sync/DelayReq/DelayResp.
@@ -132,16 +136,19 @@ pub async fn run_ptp_node(
         .context("failed to set multicast interface on event socket")?;
     set_multicast_loopback(&event_socket, false)
         .context("failed to disable multicast loopback on event socket")?;
-    set_multicast_ttl(&event_socket, 1)
-        .context("failed to set multicast TTL on event socket")?;
+    set_multicast_ttl(&event_socket, 1).context("failed to set multicast TTL on event socket")?;
 
-    info!("PTP node: joined multicast group {}", PTP_PRIMARY_MULTICAST_V4);
+    info!(
+        "PTP node: joined multicast group {}",
+        PTP_PRIMARY_MULTICAST_V4
+    );
 
     let event_socket = Arc::new(event_socket);
     let general_socket = Arc::new(general_socket);
 
     // Foreign master table for tracking announce messages.
-    let mut foreign_masters = ForeignMasterTable::new(DEFAULT_ANNOUNCE_INTERVAL_SECS, MAX_FOREIGN_MASTERS);
+    let mut foreign_masters =
+        ForeignMasterTable::new(DEFAULT_ANNOUNCE_INTERVAL_SECS, MAX_FOREIGN_MASTERS);
 
     // E2E delay state for collecting timestamps.
     let mut delay_state = E2eDelayState::new();
@@ -157,7 +164,8 @@ pub async fn run_ptp_node(
     let mut last_offset_ms: Option<f64> = None;
 
     // Timer for sending DelayReq messages.
-    let mut delay_req_interval = tokio::time::interval(Duration::from_secs(DELAY_REQ_INTERVAL_SECS));
+    let mut delay_req_interval =
+        tokio::time::interval(Duration::from_secs(DELAY_REQ_INTERVAL_SECS));
     delay_req_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // Timer for expiring stale foreign masters.
@@ -325,7 +333,10 @@ async fn handle_event_message(
     }
 
     match msg {
-        PtpMessage::Sync { header, origin_timestamp } => {
+        PtpMessage::Sync {
+            header,
+            origin_timestamp,
+        } => {
             // If this Sync is from our current master (or we don't have one yet).
             let master = header.source_port_identity;
             if current_master.is_none() || *current_master == Some(master) {
@@ -345,17 +356,25 @@ async fn handle_event_message(
 
                 debug!(
                     "PTP Sync from {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}: seq={} two_step={}",
-                    master.clock_identity[0], master.clock_identity[1],
-                    master.clock_identity[2], master.clock_identity[3],
-                    master.clock_identity[4], master.clock_identity[5],
-                    master.clock_identity[6], master.clock_identity[7],
+                    master.clock_identity[0],
+                    master.clock_identity[1],
+                    master.clock_identity[2],
+                    master.clock_identity[3],
+                    master.clock_identity[4],
+                    master.clock_identity[5],
+                    master.clock_identity[6],
+                    master.clock_identity[7],
                     header.sequence_id,
                     header.flags.has(PtpFlags::TWO_STEP),
                 );
             }
         }
 
-        PtpMessage::DelayResp { header, receive_timestamp, requesting_port } => {
+        PtpMessage::DelayResp {
+            header,
+            receive_timestamp,
+            requesting_port,
+        } => {
             // Only process DelayResp addressed to us.
             if requesting_port != *our_port {
                 return Ok(());
@@ -469,10 +488,14 @@ fn handle_general_message(
                     *current_master = Some(master);
                     info!(
                         "PTP selected master: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}-{} (GM priority1={} class={})",
-                        master.clock_identity[0], master.clock_identity[1],
-                        master.clock_identity[2], master.clock_identity[3],
-                        master.clock_identity[4], master.clock_identity[5],
-                        master.clock_identity[6], master.clock_identity[7],
+                        master.clock_identity[0],
+                        master.clock_identity[1],
+                        master.clock_identity[2],
+                        master.clock_identity[3],
+                        master.clock_identity[4],
+                        master.clock_identity[5],
+                        master.clock_identity[6],
+                        master.clock_identity[7],
                         master.port_number,
                         announce.grandmaster_priority1,
                         announce.grandmaster_clock_quality.clock_class,
@@ -482,18 +505,27 @@ fn handle_general_message(
 
             debug!(
                 "PTP Announce from {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}: qualified={} steps_removed={}",
-                master.clock_identity[0], master.clock_identity[1],
-                master.clock_identity[2], master.clock_identity[3],
-                master.clock_identity[4], master.clock_identity[5],
-                master.clock_identity[6], master.clock_identity[7],
+                master.clock_identity[0],
+                master.clock_identity[1],
+                master.clock_identity[2],
+                master.clock_identity[3],
+                master.clock_identity[4],
+                master.clock_identity[5],
+                master.clock_identity[6],
+                master.clock_identity[7],
                 qualified,
                 announce.steps_removed,
             );
         }
 
-        PtpMessage::FollowUp { header, precise_origin_timestamp } => {
+        PtpMessage::FollowUp {
+            header,
+            precise_origin_timestamp,
+        } => {
             // Match FollowUp to the pending Sync.
-            if let Some(sync_seq) = *pending_sync_seq && header.sequence_id == sync_seq {
+            if let Some(sync_seq) = *pending_sync_seq
+                && header.sequence_id == sync_seq
+            {
                 // T1 = precise_origin_timestamp from FollowUp.
                 delay_state.set_sync_departure(precise_origin_timestamp);
                 *pending_sync_seq = None;

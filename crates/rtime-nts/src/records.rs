@@ -107,17 +107,29 @@ impl NtsKeRecord {
 
     /// Create a Warning record.
     pub fn warning(warning_code: u16) -> Self {
-        Self::new(false, RecordType::Warning, warning_code.to_be_bytes().to_vec())
+        Self::new(
+            false,
+            RecordType::Warning,
+            warning_code.to_be_bytes().to_vec(),
+        )
     }
 
     /// Create a Server Negotiation record.
     pub fn server_negotiation(server: &str) -> Self {
-        Self::new(false, RecordType::NtpV4ServerNegotiation, server.as_bytes().to_vec())
+        Self::new(
+            false,
+            RecordType::NtpV4ServerNegotiation,
+            server.as_bytes().to_vec(),
+        )
     }
 
     /// Create a Port Negotiation record.
     pub fn port_negotiation(port: u16) -> Self {
-        Self::new(false, RecordType::NtpV4PortNegotiation, port.to_be_bytes().to_vec())
+        Self::new(
+            false,
+            RecordType::NtpV4PortNegotiation,
+            port.to_be_bytes().to_vec(),
+        )
     }
 
     /// Serialize this record into wire format bytes.
@@ -272,10 +284,7 @@ mod tests {
         let (parsed, _) = NtsKeRecord::parse(&bytes).unwrap();
         assert!(parsed.critical);
         assert_eq!(parsed.record_type, RecordType::Error);
-        assert_eq!(
-            u16::from_be_bytes([parsed.body[0], parsed.body[1]]),
-            1
-        );
+        assert_eq!(u16::from_be_bytes([parsed.body[0], parsed.body[1]]), 1);
     }
 
     #[test]
@@ -298,10 +307,7 @@ mod tests {
 
         let (parsed, _) = NtsKeRecord::parse(&bytes).unwrap();
         assert_eq!(parsed.record_type, RecordType::NtpV4PortNegotiation);
-        assert_eq!(
-            u16::from_be_bytes([parsed.body[0], parsed.body[1]]),
-            123
-        );
+        assert_eq!(u16::from_be_bytes([parsed.body[0], parsed.body[1]]), 123);
     }
 
     #[test]

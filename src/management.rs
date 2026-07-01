@@ -111,9 +111,7 @@ async fn auth_middleware(
     }
 }
 
-async fn get_status(
-    State(status): State<Arc<RwLock<DaemonStatus>>>,
-) -> Json<StatusResponse> {
+async fn get_status(State(status): State<Arc<RwLock<DaemonStatus>>>) -> Json<StatusResponse> {
     let state = status.read().await;
     let uptime = state.start_time.elapsed().as_secs_f64();
 
@@ -125,9 +123,7 @@ async fn get_status(
     })
 }
 
-async fn get_sources(
-    State(status): State<Arc<RwLock<DaemonStatus>>>,
-) -> Json<Vec<SourceStatus>> {
+async fn get_sources(State(status): State<Arc<RwLock<DaemonStatus>>>) -> Json<Vec<SourceStatus>> {
     let state = status.read().await;
     Json(state.sources.clone())
 }

@@ -21,7 +21,11 @@ mod ptp_node;
 mod single_instance;
 
 #[derive(Parser)]
-#[command(name = "rtime", version, about = "rTime - NTP/PTP time synchronization service")]
+#[command(
+    name = "rtime",
+    version,
+    about = "rTime - NTP/PTP time synchronization service"
+)]
 struct Cli {
     /// NTP server to query (host:port or just host for default port 123)
     #[arg(short, long)]
@@ -94,8 +98,8 @@ fn query_ntp_server(addr: SocketAddr) -> Result<client::NtpResult> {
     }
 
     let response = NtpPacket::parse(&buf[..len]).context("failed to parse NTP response")?;
-    let result =
-        client::process_response(&response, t1, t4, cookie).context("failed to process response")?;
+    let result = client::process_response(&response, t1, t4, cookie)
+        .context("failed to process response")?;
 
     Ok(result)
 }
@@ -105,7 +109,10 @@ fn query_ntp_server(addr: SocketAddr) -> Result<client::NtpResult> {
 fn load_config(path: &str) -> Result<RtimeConfig> {
     let path = Path::new(path);
     if !path.exists() {
-        info!("Config file not found at {}, using defaults", path.display());
+        info!(
+            "Config file not found at {}, using defaults",
+            path.display()
+        );
         return Ok(RtimeConfig::default());
     }
 
@@ -132,9 +139,7 @@ async fn main() -> Result<()> {
             .with_env_filter(env_filter)
             .init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 
     if let Some(server) = &cli.server {
@@ -159,7 +164,9 @@ async fn main() -> Result<()> {
 
         // Daemon mode: load config and run the full daemon.
         let mut config = load_config(&cli.config)?;
-        config.validate().context("configuration validation failed")?;
+        config
+            .validate()
+            .context("configuration validation failed")?;
 
         if cli.no_discipline {
             config.clock.discipline = false;
@@ -169,7 +176,11 @@ async fn main() -> Result<()> {
         info!(
             "Config: {} NTP sources, server={}, listen={}, management={}",
             config.ntp.sources.len(),
-            if config.ntp.enabled { "enabled" } else { "disabled" },
+            if config.ntp.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
             config.ntp.listen,
             if config.management.enabled {
                 config.management.listen.as_str()
@@ -236,10 +247,7 @@ async fn run_single_query(server: &str, count: u32) -> Result<()> {
 
         // Compute jitter (RMS of successive differences)
         let jitter = if offsets.len() > 1 {
-            let sum_sq: f64 = offsets
-                .windows(2)
-                .map(|w| (w[1] - w[0]).powi(2))
-                .sum();
+            let sum_sq: f64 = offsets.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum();
             (sum_sq / (offsets.len() - 1) as f64).sqrt()
         } else {
             0.0

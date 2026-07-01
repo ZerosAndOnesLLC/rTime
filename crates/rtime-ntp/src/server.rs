@@ -1,7 +1,7 @@
 use rtime_core::clock::LeapIndicator;
 use rtime_core::timestamp::NtpTimestamp;
 
-use crate::packet::{NtpMode, NtpPacket, NTP_VERSION};
+use crate::packet::{NTP_VERSION, NtpMode, NtpPacket};
 
 /// Server-side state used to populate response fields.
 #[derive(Debug, Clone)]
@@ -151,8 +151,7 @@ mod tests {
         let t4 = NtpTimestamp::new(3_900_000_100, 210_000);
 
         // Client processes the response
-        let result = client::process_response(&parsed, t1, t4, cookie)
-            .expect("process response");
+        let result = client::process_response(&parsed, t1, t4, cookie).expect("process response");
 
         assert_eq!(result.stratum, 1);
         assert_eq!(result.leap_indicator, LeapIndicator::NoWarning);

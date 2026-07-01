@@ -18,8 +18,8 @@ impl PollInterval {
     pub fn new() -> Self {
         Self {
             current: 6,
-            min: 4,   // 16 seconds
-            max: 10,  // 1024 seconds
+            min: 4,  // 16 seconds
+            max: 10, // 1024 seconds
         }
     }
 

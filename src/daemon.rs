@@ -71,15 +71,10 @@ impl Daemon {
 
         // Spawn metrics exporter if enabled.
         let metrics_handle = if self.config.metrics.enabled {
-            let metrics_addr: SocketAddr = self
-                .config
-                .metrics
-                .listen
-                .parse()
-                .context(format!(
-                    "invalid metrics listen address: {}",
-                    self.config.metrics.listen
-                ))?;
+            let metrics_addr: SocketAddr = self.config.metrics.listen.parse().context(format!(
+                "invalid metrics listen address: {}",
+                self.config.metrics.listen
+            ))?;
 
             let exporter = rtime_metrics::exporter::MetricsExporter::new(Arc::clone(&self.ready));
 
@@ -125,15 +120,10 @@ impl Daemon {
         // See rTime issue #45 — previously this used `?` and a bind-port
         // race caused an infinite process-restart loop via `daemon -R 5`.
         let management_handle = if self.config.management.enabled {
-            let mgmt_addr: SocketAddr = self
-                .config
-                .management
-                .listen
-                .parse()
-                .context(format!(
-                    "invalid management listen address: {}",
-                    self.config.management.listen
-                ))?;
+            let mgmt_addr: SocketAddr = self.config.management.listen.parse().context(format!(
+                "invalid management listen address: {}",
+                self.config.management.listen
+            ))?;
 
             match bind_tcp_reuseaddr(mgmt_addr) {
                 Ok(listener) => {
@@ -147,7 +137,10 @@ impl Daemon {
                         }
                     });
 
-                    info!("Management API enabled on {}", self.config.management.listen);
+                    info!(
+                        "Management API enabled on {}",
+                        self.config.management.listen
+                    );
                     Some(handle)
                 }
                 Err(e) => {
@@ -172,12 +165,20 @@ impl Daemon {
             let addr = resolve_source_addr(&source.address)
                 .context(format!("failed to resolve NTP source: {}", source.address))?;
 
-            info!("Spawning NTP client for source: {} ({})", source.address, addr);
+            info!(
+                "Spawning NTP client for source: {} ({})",
+                source.address, addr
+            );
 
             let tx = self
                 .measurement_tx
                 .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("measurement_tx already taken before spawning NTP client for {}", source.address))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "measurement_tx already taken before spawning NTP client for {}",
+                        source.address
+                    )
+                })?
                 .clone();
             let shutdown = self.shutdown_rx.clone();
             let metrics_enabled = self.config.metrics.enabled;
@@ -185,7 +186,16 @@ impl Daemon {
             let max_poll = source.max_poll;
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = ntp_client::run_ntp_client(addr, tx, shutdown, metrics_enabled, min_poll, max_poll).await {
+                if let Err(e) = ntp_client::run_ntp_client(
+                    addr,
+                    tx,
+                    shutdown,
+                    metrics_enabled,
+                    min_poll,
+                    max_poll,
+                )
+                .await
+                {
                     error!("NTP client for {} exited with error: {}", addr, e);
                 }
             });
@@ -199,7 +209,9 @@ impl Daemon {
             let tx = self
                 .measurement_tx
                 .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("measurement_tx already taken before spawning PTP node"))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("measurement_tx already taken before spawning PTP node")
+                })?
                 .clone();
             let shutdown = self.shutdown_rx.clone();
 
@@ -209,7 +221,10 @@ impl Daemon {
                 }
             });
 
-            info!("PTP node enabled (domain={}, interface={})", self.config.ptp.domain, self.config.ptp.interface);
+            info!(
+                "PTP node enabled (domain={}, interface={})",
+                self.config.ptp.domain, self.config.ptp.interface
+            );
             Some(handle)
         } else {
             info!("PTP node disabled");
@@ -222,15 +237,10 @@ impl Daemon {
 
         // Spawn NTP server task if enabled.
         let server_handle = if self.config.ntp.enabled {
-            let listen_addr: SocketAddr = self
-                .config
-                .ntp
-                .listen
-                .parse()
-                .context(format!(
-                    "invalid NTP listen address: {}",
-                    self.config.ntp.listen
-                ))?;
+            let listen_addr: SocketAddr = self.config.ntp.listen.parse().context(format!(
+                "invalid NTP listen address: {}",
+                self.config.ntp.listen
+            ))?;
 
             let state = Arc::clone(&server_state);
             let shutdown = self.shutdown_rx.clone();
@@ -240,7 +250,16 @@ impl Daemon {
             let rate_burst = self.config.ntp.rate_burst;
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = ntp_server::run_ntp_server(listen_addr, state, shutdown, metrics_enabled, rate_limit, rate_burst).await {
+                if let Err(e) = ntp_server::run_ntp_server(
+                    listen_addr,
+                    state,
+                    shutdown,
+                    metrics_enabled,
+                    rate_limit,
+                    rate_burst,
+                )
+                .await
+                {
                     error!("NTP server exited with error: {}", e);
                 }
             });
@@ -303,8 +322,13 @@ impl Daemon {
         let metrics_enabled = self.config.metrics.enabled;
         let daemon_status = Arc::clone(&self.daemon_status);
         let ready = Arc::clone(&self.ready);
-        self.run_selection_loop(Arc::clone(&server_state), metrics_enabled, daemon_status, ready)
-            .await;
+        self.run_selection_loop(
+            Arc::clone(&server_state),
+            metrics_enabled,
+            daemon_status,
+            ready,
+        )
+        .await;
 
         // Signal shutdown to all tasks.
         let _ = self.shutdown_tx.send(true);
@@ -360,10 +384,8 @@ impl Daemon {
     ) {
         // Collect recent measurements per source. We keep the latest measurement
         // from each source for the selection algorithm.
-        let mut latest_measurements: std::collections::HashMap<
-            String,
-            SourceMeasurement,
-        > = std::collections::HashMap::new();
+        let mut latest_measurements: std::collections::HashMap<String, SourceMeasurement> =
+            std::collections::HashMap::new();
 
         let mut shutdown = self.shutdown_rx.clone();
 

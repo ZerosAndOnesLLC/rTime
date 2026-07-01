@@ -2,9 +2,16 @@
 name = "rtime-clock"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Platform clock interfaces for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "System clock interfaces (adjtime/adjtimex slew and step, PTP hardware clock) for the rTime NTP/PTP daemon"
+documentation = "https://docs.rs/rtime-clock"
+readme = "README.md"
+keywords = ["clock", "adjtime", "adjtimex", "time", "ntp"]
+categories = ["os::unix-apis", "date-and-time"]
 
 [dependencies]
 rtime-core = { workspace = true }

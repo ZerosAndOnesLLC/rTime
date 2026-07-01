@@ -306,9 +306,7 @@ impl AnnounceBody {
                 got: data.len(),
             });
         }
-        let origin_timestamp = PtpTimestamp::from_bytes(
-            <[u8; 10]>::try_from(&data[0..10])?,
-        );
+        let origin_timestamp = PtpTimestamp::from_bytes(<[u8; 10]>::try_from(&data[0..10])?);
         let current_utc_offset = i16::from_be_bytes([data[10], data[11]]);
         // data[12] is reserved
         let grandmaster_priority1 = data[13];
@@ -401,9 +399,8 @@ impl PtpMessage {
                         got: data.len(),
                     });
                 }
-                let origin_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10])?,
-                );
+                let origin_timestamp =
+                    PtpTimestamp::from_bytes(<[u8; 10]>::try_from(&body[0..10])?);
                 Ok(Self::Sync {
                     header,
                     origin_timestamp,
@@ -416,9 +413,8 @@ impl PtpMessage {
                         got: data.len(),
                     });
                 }
-                let precise_origin_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10])?,
-                );
+                let precise_origin_timestamp =
+                    PtpTimestamp::from_bytes(<[u8; 10]>::try_from(&body[0..10])?);
                 Ok(Self::FollowUp {
                     header,
                     precise_origin_timestamp,
@@ -431,9 +427,8 @@ impl PtpMessage {
                         got: data.len(),
                     });
                 }
-                let origin_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10])?,
-                );
+                let origin_timestamp =
+                    PtpTimestamp::from_bytes(<[u8; 10]>::try_from(&body[0..10])?);
                 Ok(Self::DelayReq {
                     header,
                     origin_timestamp,
@@ -446,9 +441,8 @@ impl PtpMessage {
                         got: data.len(),
                     });
                 }
-                let receive_timestamp = PtpTimestamp::from_bytes(
-                    <[u8; 10]>::try_from(&body[0..10])?,
-                );
+                let receive_timestamp =
+                    PtpTimestamp::from_bytes(<[u8; 10]>::try_from(&body[0..10])?);
                 let requesting_port = PortIdentity::parse(&body[10..20])?;
                 Ok(Self::DelayResp {
                     header,
@@ -470,7 +464,7 @@ impl PtpMessage {
         }
     }
 
-    /// Serialize a PTP message into a Vec<u8>.
+    /// Serialize a PTP message into a `Vec<u8>`.
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             Self::Sync {
@@ -702,7 +696,9 @@ mod tests {
                 assert_eq!(announce.grandmaster_clock_quality.clock_class, 6);
                 assert_eq!(announce.grandmaster_clock_quality.clock_accuracy, 0x21);
                 assert_eq!(
-                    announce.grandmaster_clock_quality.offset_scaled_log_variance,
+                    announce
+                        .grandmaster_clock_quality
+                        .offset_scaled_log_variance,
                     0x4E5D
                 );
                 assert_eq!(announce.grandmaster_priority2, 128);

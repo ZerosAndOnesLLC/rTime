@@ -2,9 +2,16 @@
 name = "rtime-ptp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "PTP/IEEE 1588 protocol implementation for rTime"
+repository.workspace = true
+homepage.workspace = true
+description = "PTP / IEEE 1588 protocol implementation: message codec, BMCA, announce/sync/delay handling, and TLVs for the rTime daemon"
+documentation = "https://docs.rs/rtime-ptp"
+readme = "README.md"
+keywords = ["ptp", "ieee1588", "time", "clock", "synchronization"]
+categories = ["network-programming", "date-and-time", "parser-implementations"]
 
 [dependencies]
 rtime-core = { workspace = true }

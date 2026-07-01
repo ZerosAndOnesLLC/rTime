@@ -7,9 +7,8 @@ use rand::Rng;
 use rtime_nts::aead::{NtsAead, SIV_TAG_SIZE};
 use rtime_nts::cookie::CookieJar;
 use rtime_nts::ke::{
-    build_client_request, build_server_response, derive_keys, generate_cookies,
-    parse_client_request, parse_server_response, select_algorithm, ExporterError,
-    ExporterInterface,
+    ExporterError, ExporterInterface, build_client_request, build_server_response, derive_keys,
+    generate_cookies, parse_client_request, parse_server_response, select_algorithm,
 };
 use rtime_nts::records::{NtsKeRecord, RecordType};
 use rtime_nts::{AEAD_AES_SIV_CMAC_256, AEAD_AES_SIV_CMAC_256_KEYLEN, DEFAULT_COOKIE_COUNT};
@@ -185,8 +184,7 @@ fn nts_ke_records_roundtrip() {
     wire_data.extend_from_slice(&NtsKeRecord::aead_algorithm(&[AEAD_AES_SIV_CMAC_256]).serialize());
     wire_data.extend_from_slice(&NtsKeRecord::new_cookie(vec![0xAA; 64]).serialize());
     wire_data.extend_from_slice(&NtsKeRecord::new_cookie(vec![0xBB; 64]).serialize());
-    wire_data
-        .extend_from_slice(&NtsKeRecord::server_negotiation("time.example.org").serialize());
+    wire_data.extend_from_slice(&NtsKeRecord::server_negotiation("time.example.org").serialize());
     wire_data.extend_from_slice(&NtsKeRecord::port_negotiation(4460).serialize());
     wire_data.extend_from_slice(&NtsKeRecord::end_of_message().serialize());
 

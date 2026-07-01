@@ -200,8 +200,14 @@ mod tests {
         );
 
         // Best sample should be the one with delay=10ms, offset=90ms.
-        assert_eq!(result.delay.to_nanos(), NtpDuration::from_millis(10).to_nanos());
-        assert_eq!(result.offset.to_nanos(), NtpDuration::from_millis(90).to_nanos());
+        assert_eq!(
+            result.delay.to_nanos(),
+            NtpDuration::from_millis(10).to_nanos()
+        );
+        assert_eq!(
+            result.offset.to_nanos(),
+            NtpDuration::from_millis(90).to_nanos()
+        );
     }
 
     #[test]
@@ -288,7 +294,10 @@ mod tests {
             assert!(r.jitter >= 0.0);
         }
         let final_result = filter.add_sample(offset, delay, disp);
-        assert!(final_result.jitter < 1e-9, "jitter should converge to ~0 for constant offsets");
+        assert!(
+            final_result.jitter < 1e-9,
+            "jitter should converge to ~0 for constant offsets"
+        );
     }
 
     #[test]
@@ -298,7 +307,11 @@ mod tests {
         // Fill beyond FILTER_SIZE to ensure wrap-around works.
         for i in 0..16 {
             let delay = NtpDuration::from_millis(100 - i);
-            filter.add_sample(NtpDuration::from_millis(i), delay, NtpDuration::from_millis(1));
+            filter.add_sample(
+                NtpDuration::from_millis(i),
+                delay,
+                NtpDuration::from_millis(1),
+            );
         }
 
         // After 16 samples, only last 8 are in the window (i=8..15).

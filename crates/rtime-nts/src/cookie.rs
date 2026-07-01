@@ -19,15 +19,15 @@
 //! +----------+------------+----------+-----------+
 //! ```
 
-use std::collections::VecDeque;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aes_siv::Aes128SivAead;
 use aes_siv::aead::generic_array::GenericArray;
 use aes_siv::aead::{Aead, KeyInit, Payload};
-use aes_siv::Aes128SivAead;
 use rand::Rng;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{AEAD_AES_SIV_CMAC_256_KEYLEN, NtsError};
@@ -189,11 +189,13 @@ impl CookieJar {
         let ciphertext = &cookie[KEY_ID_SIZE + COOKIE_NONCE_SIZE..];
 
         // Replay protection: reject cookies with previously seen nonces.
-        let nonce_array: [u8; COOKIE_NONCE_SIZE] = nonce.try_into().map_err(|_| {
-            NtsError::InvalidCookie("nonce length mismatch".to_string())
-        })?;
+        let nonce_array: [u8; COOKIE_NONCE_SIZE] = nonce
+            .try_into()
+            .map_err(|_| NtsError::InvalidCookie("nonce length mismatch".to_string()))?;
         if self.used_nonces.contains(&nonce_array) {
-            return Err(NtsError::InvalidCookie("cookie replay detected".to_string()));
+            return Err(NtsError::InvalidCookie(
+                "cookie replay detected".to_string(),
+            ));
         }
 
         // Select decryption key based on key_id instead of blindly trying both.
@@ -208,9 +210,10 @@ impl CookieJar {
                 ));
             }
         } else {
-            return Err(NtsError::InvalidCookie(
-                format!("unknown key_id: {}", key_id),
-            ));
+            return Err(NtsError::InvalidCookie(format!(
+                "unknown key_id: {}",
+                key_id
+            )));
         };
 
         // Parse plaintext: algorithm (2B) + created_at (8B) + c2s_key + s2c_key
@@ -222,8 +225,14 @@ impl CookieJar {
 
         let algorithm = u16::from_be_bytes([plaintext[0], plaintext[1]]);
         let created_at = u64::from_be_bytes([
-            plaintext[2], plaintext[3], plaintext[4], plaintext[5],
-            plaintext[6], plaintext[7], plaintext[8], plaintext[9],
+            plaintext[2],
+            plaintext[3],
+            plaintext[4],
+            plaintext[5],
+            plaintext[6],
+            plaintext[7],
+            plaintext[8],
+            plaintext[9],
         ]);
 
         // Time-based expiration: reject cookies older than TTL.
@@ -232,9 +241,7 @@ impl CookieJar {
             .unwrap_or_default()
             .as_secs();
         if now.saturating_sub(created_at) >= self.cookie_ttl_secs {
-            return Err(NtsError::InvalidCookie(
-                "cookie has expired".to_string(),
-            ));
+            return Err(NtsError::InvalidCookie("cookie has expired".to_string()));
         }
 
         let key_data = &plaintext[10..];
