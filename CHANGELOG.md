@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1]
+
+### Changed
+
+- Updated all dependencies to the latest compatible versions.
+
 ## [0.14.0]
 
 ### Added
@@ -21,4 +27,5 @@ All notable changes to this project are documented here. The format is based on
   registry when published.
 - Updated all dependencies to the latest stable, compatible versions.
 
+[0.14.1]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.1
 [0.14.0]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.0

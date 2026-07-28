@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.14.0"
+version = "0.14.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -26,14 +26,14 @@ homepage = "https://github.com/ZerosAndOnesLLC/rTime"
 subtle = "2"
 
 # Internal crates (version pins are required so path deps resolve on crates.io)
-rtime-core = { path = "crates/rtime-core", version = "0.14.0" }
-rtime-ntp = { path = "crates/rtime-ntp", version = "0.14.0" }
-rtime-nts = { path = "crates/rtime-nts", version = "0.14.0" }
-rtime-ptp = { path = "crates/rtime-ptp", version = "0.14.0" }
-rtime-clock = { path = "crates/rtime-clock", version = "0.14.0" }
-rtime-net = { path = "crates/rtime-net", version = "0.14.0" }
-rtime-refclock = { path = "crates/rtime-refclock", version = "0.14.0" }
-rtime-metrics = { path = "crates/rtime-metrics", version = "0.14.0" }
+rtime-core = { path = "crates/rtime-core", version = "0.14.1" }
+rtime-ntp = { path = "crates/rtime-ntp", version = "0.14.1" }
+rtime-nts = { path = "crates/rtime-nts", version = "0.14.1" }
+rtime-ptp = { path = "crates/rtime-ptp", version = "0.14.1" }
+rtime-clock = { path = "crates/rtime-clock", version = "0.14.1" }
+rtime-net = { path = "crates/rtime-net", version = "0.14.1" }
+rtime-refclock = { path = "crates/rtime-refclock", version = "0.14.1" }
+rtime-metrics = { path = "crates/rtime-metrics", version = "0.14.1" }
 
 # Async
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "signal", "macros"] }
