@@ -6,7 +6,7 @@
 //! internally it uses two 128-bit subkeys, totaling a 32-byte key.
 
 use aes_siv::Aes128SivAead;
-use aes_siv::aead::generic_array::GenericArray;
+use aes_siv::Nonce;
 use aes_siv::aead::{Aead, KeyInit, Payload};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -137,7 +137,7 @@ fn encrypt_aes_siv(
 
     // Use a zero nonce for the Aead trait call. The SIV construction
     // derives its own IV from the authentication tag.
-    let zero_nonce = GenericArray::default();
+    let zero_nonce = Nonce::default();
     cipher
         .encrypt(&zero_nonce, payload)
         .map_err(|_| NtsError::EncryptionFailed)
@@ -161,7 +161,7 @@ fn decrypt_aes_siv(
         aad: &combined_aad,
     };
 
-    let zero_nonce = GenericArray::default();
+    let zero_nonce = Nonce::default();
     cipher
         .decrypt(&zero_nonce, payload)
         .map_err(|_| NtsError::DecryptionFailed)

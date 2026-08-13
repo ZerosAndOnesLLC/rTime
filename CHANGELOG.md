@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2]
+
+### Changed
+
+- Updated all dependencies to the latest stable versions.
+- `aes-siv` 0.7 → 0.8 (RustCrypto `aead` 0.6 stack); internal AEAD code in
+  `rtime-nts` migrated off the removed `GenericArray` type. No wire-format or
+  API changes.
+
 ## [0.14.1]
 
 ### Changed
@@ -27,5 +36,6 @@ All notable changes to this project are documented here. The format is based on
   registry when published.
 - Updated all dependencies to the latest stable, compatible versions.
 
+[0.14.2]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.2
 [0.14.1]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.1
 [0.14.0]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.0
