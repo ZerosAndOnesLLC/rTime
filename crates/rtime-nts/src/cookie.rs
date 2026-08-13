@@ -24,7 +24,7 @@ use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_siv::Aes128SivAead;
-use aes_siv::aead::generic_array::GenericArray;
+use aes_siv::Nonce;
 use aes_siv::aead::{Aead, KeyInit, Payload};
 use rand::Rng;
 use sha2::{Digest, Sha256};
@@ -149,7 +149,7 @@ impl CookieJar {
 
         // Encrypt with current key
         let cipher = Aes128SivAead::new((&self.current_key).into());
-        let zero_nonce = GenericArray::default();
+        let zero_nonce = Nonce::default();
         let payload = Payload {
             msg: &plaintext,
             aad: &nonce,
@@ -297,7 +297,7 @@ fn decrypt_cookie_data(
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, NtsError> {
     let cipher = Aes128SivAead::new(key.into());
-    let zero_nonce = GenericArray::default();
+    let zero_nonce = Nonce::default();
     let payload = Payload {
         msg: ciphertext,
         aad: nonce,

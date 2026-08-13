@@ -18,7 +18,7 @@ rtime-core = { workspace = true }
 thiserror = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = "1"
-aes-siv = "0.7"
+aes-siv = { workspace = true }
 rand = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
