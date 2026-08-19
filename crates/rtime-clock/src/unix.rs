@@ -26,15 +26,30 @@ impl UnixClock {
 
     // --- probe_adjustable ---
 
+    /// A read-only `adjtimex` query (modes = 0) succeeds for any user, so it
+    /// cannot tell us whether we hold `CAP_SYS_TIME`. Instead inject a
+    /// zero-length offset: any non-zero `modes` requires the capability and
+    /// fails with `EPERM` without it, while a zero offset leaves the clock
+    /// untouched when it does succeed.
     #[cfg(target_os = "linux")]
     fn probe_adjustable() -> bool {
-        let mut tx = Timex::new(); // modes = 0 => read-only query
+        let mut tx = Timex::new();
+        tx.0.modes = libc::ADJ_SETOFFSET | libc::ADJ_NANO;
+        tx.0.time.tv_sec = 0;
+        tx.0.time.tv_usec = 0;
         crate::adjtime::adjtimex(&mut tx).is_ok()
     }
 
+    /// Like Linux, a modes = 0 `ntp_adjtime` query needs no privilege.
+    /// Read the current frequency and write the same value back: a
+    /// non-zero `modes` requires root and fails with `EPERM` otherwise.
     #[cfg(target_os = "freebsd")]
     fn probe_adjustable() -> bool {
         let mut tx = Timex::new(); // modes = 0 => read-only query
+        if crate::adjtime::ntp_adjtime(&mut tx).is_err() {
+            return false;
+        }
+        tx.0.modes = MOD_FREQUENCY as u32;
         crate::adjtime::ntp_adjtime(&mut tx).is_ok()
     }
 
@@ -47,11 +62,11 @@ impl UnixClock {
 
     #[cfg(target_os = "linux")]
     fn step_impl(&self, offset: NtpDuration) -> Result<(), ClockError> {
-        let nanos = offset.to_nanos();
+        let (secs, nanos) = split_timespec(offset.to_nanos());
         let mut tx = Timex::new();
         tx.0.modes = libc::ADJ_SETOFFSET | libc::ADJ_NANO;
-        tx.0.time.tv_sec = nanos / 1_000_000_000;
-        tx.0.time.tv_usec = nanos % 1_000_000_000;
+        tx.0.time.tv_sec = secs;
+        tx.0.time.tv_usec = nanos;
 
         crate::adjtime::adjtimex(&mut tx).map_err(|err| {
             if err.raw_os_error() == Some(libc::EPERM) {
@@ -70,18 +85,14 @@ impl UnixClock {
         let ts = nix::time::clock_gettime(nix::time::ClockId::CLOCK_REALTIME)
             .map_err(|e| ClockError::Os(e.into()))?;
 
-        let nanos = offset.to_nanos();
-        let mut tv_sec = ts.tv_sec() + nanos / 1_000_000_000;
-        let mut tv_nsec = ts.tv_nsec() + (nanos % 1_000_000_000) as libc::c_long;
+        let (secs, nanos) = split_timespec(offset.to_nanos());
+        let mut tv_sec = ts.tv_sec() + secs;
+        let mut tv_nsec = ts.tv_nsec() + nanos as libc::c_long;
 
-        // Normalize tv_nsec into [0, 999_999_999]
-        while tv_nsec >= 1_000_000_000 {
+        // Both parts are normalized, so at most one carry is needed.
+        if tv_nsec >= 1_000_000_000 {
             tv_sec += 1;
             tv_nsec -= 1_000_000_000;
-        }
-        while tv_nsec < 0 {
-            tv_sec -= 1;
-            tv_nsec += 1_000_000_000;
         }
 
         let new_ts = TimeSpec::new(tv_sec, tv_nsec);
@@ -210,5 +221,45 @@ impl Clock for UnixClock {
 
     fn is_adjustable(&self) -> bool {
         self.adjustable
+    }
+}
+
+/// Split a signed nanosecond duration into a normalized `(tv_sec, tv_nsec)`
+/// pair with `0 <= tv_nsec < 1_000_000_000`, as the kernel requires.
+///
+/// A naive `nanos / 1e9, nanos % 1e9` truncates toward zero, so a negative
+/// sub-second step such as −250 ms became `(0, −250_000_000)`, which Linux's
+/// `ADJ_SETOFFSET` rejects with `EINVAL` (`timekeeping_inject_offset` insists
+/// on a non-negative `tv_nsec`). The clock could then never be stepped
+/// backwards by anything other than a whole number of seconds.
+#[cfg_attr(not(any(target_os = "linux", target_os = "freebsd")), allow(dead_code))]
+fn split_timespec(nanos: i64) -> (i64, i64) {
+    (
+        nanos.div_euclid(1_000_000_000),
+        nanos.rem_euclid(1_000_000_000),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_timespec_normalizes_negative_subsecond() {
+        assert_eq!(split_timespec(0), (0, 0));
+        assert_eq!(split_timespec(1_500_000_000), (1, 500_000_000));
+        assert_eq!(split_timespec(-250_000_000), (-1, 750_000_000));
+        assert_eq!(split_timespec(-1_000_000_000), (-1, 0));
+        assert_eq!(split_timespec(-1_250_000_000), (-2, 750_000_000));
+        assert_eq!(split_timespec(999_999_999), (0, 999_999_999));
+    }
+
+    #[test]
+    fn split_timespec_roundtrips() {
+        for n in [-3_000_000_001i64, -1, 0, 1, 2_999_999_999, i64::MIN / 2] {
+            let (s, ns) = split_timespec(n);
+            assert!((0..1_000_000_000).contains(&ns));
+            assert_eq!(s * 1_000_000_000 + ns, n);
+        }
     }
 }

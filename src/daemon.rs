@@ -14,13 +14,12 @@ use rtime_core::selection::select_sources;
 use rtime_core::servo::ServoConfig;
 use rtime_core::source::{SourceId, SourceMeasurement};
 use rtime_core::steps::StepLedger;
-use rtime_core::timestamp::NtpDuration;
 use rtime_metrics::instruments;
 use rtime_ntp::server::ServerState;
 
 use crate::clock_discipline::{self, DisciplineExit};
 use crate::management::{self, DaemonStatus, SourceStatus};
-use crate::measurement::StampedMeasurement;
+use crate::measurement::{SelectedOffset, StampedMeasurement};
 use crate::ntp_client;
 use crate::ntp_server;
 use crate::ptp_node;
@@ -37,8 +36,8 @@ pub struct Daemon {
     config: Arc<RtimeConfig>,
     measurement_tx: Option<mpsc::Sender<StampedMeasurement>>,
     measurement_rx: mpsc::Receiver<StampedMeasurement>,
-    offset_tx: watch::Sender<Option<NtpDuration>>,
-    offset_rx: watch::Receiver<Option<NtpDuration>>,
+    offset_tx: watch::Sender<Option<SelectedOffset>>,
+    offset_rx: watch::Receiver<Option<SelectedOffset>>,
     /// Ledger of clock steps applied by the discipline task, consulted by the
     /// selection loop to reconcile measurements taken before a step.
     step_tx: watch::Sender<StepLedger>,
@@ -448,11 +447,13 @@ impl Daemon {
                     // Run source selection on every cached measurement that is
                     // still trustworthy after the clock steps applied since it
                     // was taken.
-                    let measurements = usable_measurements(
-                        &mut latest_measurements,
-                        &self.step_rx.borrow(),
-                        Instant::now(),
-                    );
+                    let (measurements, ledger_sequence) = {
+                        let ledger = self.step_rx.borrow();
+                        (
+                            usable_measurements(&mut latest_measurements, &ledger, Instant::now()),
+                            ledger.sequence(),
+                        )
+                    };
 
                     if !measurements.is_empty() {
                         let result = select_sources(&measurements);
@@ -509,7 +510,10 @@ impl Daemon {
                             }
 
                             // Send system offset to clock discipline task.
-                            let _ = self.offset_tx.send(Some(result.system_offset));
+                            let _ = self.offset_tx.send(Some(SelectedOffset {
+                                offset: result.system_offset,
+                                ledger_sequence,
+                            }));
 
                             // Mark daemon as ready after first successful selection.
                             if !ready.load(Ordering::Relaxed) {
@@ -672,7 +676,7 @@ mod tests {
     use std::time::Duration;
 
     use rtime_core::clock::LeapIndicator;
-    use rtime_core::timestamp::NtpTimestamp;
+    use rtime_core::timestamp::{NtpDuration, NtpTimestamp};
 
     fn ntp_measurement(
         n: u8,

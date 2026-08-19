@@ -9,6 +9,21 @@
 use std::time::{Duration, Instant};
 
 use rtime_core::source::SourceMeasurement;
+use rtime_core::timestamp::NtpDuration;
+
+/// A system offset elected by the selection loop, handed to the discipline
+/// task.
+///
+/// `ledger_sequence` is the step-ledger sequence number the measurements were
+/// reconciled against. If the discipline task has recorded a step since then,
+/// the offset was computed from a cache that did not yet know about that step
+/// and must not be applied — it would re-apply the step. The selection loop
+/// will publish a fresh, reconciled offset on its next measurement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SelectedOffset {
+    pub offset: NtpDuration,
+    pub ledger_sequence: u64,
+}
 
 /// A source measurement plus the monotonic window in which it was taken.
 #[derive(Clone, Debug)]
