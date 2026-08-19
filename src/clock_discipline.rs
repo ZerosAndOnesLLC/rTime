@@ -10,6 +10,8 @@ use rtime_core::steps::StepLedger;
 use rtime_core::timestamp::NtpDuration;
 use rtime_metrics::instruments;
 
+use crate::measurement::SelectedOffset;
+
 /// Why the discipline task stopped.
 #[derive(Debug)]
 pub enum DisciplineExit {
@@ -24,7 +26,7 @@ pub enum DisciplineExit {
 
 /// Async task that disciplines the system clock based on offset measurements.
 ///
-/// Receives `NtpDuration` offsets from the selection task via a watch channel,
+/// Receives [`SelectedOffset`]s from the selection task via a watch channel,
 /// feeds them into the PI servo, and applies the resulting actions to the clock.
 /// Every step it applies is recorded in `step_tx` so the selection loop can
 /// reconcile measurements taken before the clock moved (see
@@ -40,7 +42,7 @@ pub enum DisciplineExit {
 #[allow(clippy::too_many_arguments)]
 pub async fn run_clock_discipline(
     clock: Arc<dyn Clock>,
-    mut offset_rx: watch::Receiver<Option<NtpDuration>>,
+    mut offset_rx: watch::Receiver<Option<SelectedOffset>>,
     step_tx: watch::Sender<StepLedger>,
     poll_interval_secs: f64,
     config: ServoConfig,
@@ -57,7 +59,21 @@ pub async fn run_clock_discipline(
     loop {
         tokio::select! {
             Ok(()) = offset_rx.changed() => {
-                let Some(offset) = *offset_rx.borrow() else { continue };
+                let Some(SelectedOffset { offset, ledger_sequence }) = *offset_rx.borrow() else {
+                    continue;
+                };
+                // The selection loop reconciles its cache against the step
+                // ledger *it* saw. If we have stepped since, this offset still
+                // contains that step and applying it would double it; skip it
+                // and wait for the next, reconciled, selection.
+                let current_sequence = step_tx.borrow().sequence();
+                if ledger_sequence != current_sequence {
+                    debug!(
+                        "Ignoring offset {} computed against step ledger #{} (now #{})",
+                        offset, ledger_sequence, current_sequence
+                    );
+                    continue;
+                }
                 let offset_ns = offset.to_nanos() as f64;
                 let action = servo.sample(offset_ns, poll_interval_secs);
 
