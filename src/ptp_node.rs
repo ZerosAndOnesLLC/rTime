@@ -27,6 +27,8 @@ use rtime_ptp::announce::ForeignMasterTable;
 use rtime_ptp::delay::E2eDelayState;
 use rtime_ptp::message::{MessageType, PortIdentity, PtpFlags, PtpHeader, PtpMessage};
 
+use crate::measurement::StampedMeasurement;
+
 /// Maximum PTP packet size we expect to receive.
 const PTP_MAX_PACKET_SIZE: usize = 1500;
 
@@ -84,7 +86,7 @@ fn resolve_interface_addr(interface: &str) -> Ipv4Addr {
 /// 6. Sends SourceMeasurement on the shared channel
 pub async fn run_ptp_node(
     config: Arc<PtpConfig>,
-    measurement_tx: mpsc::Sender<SourceMeasurement>,
+    measurement_tx: mpsc::Sender<StampedMeasurement>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
     let interface_addr = resolve_interface_addr(&config.interface);
@@ -152,6 +154,9 @@ pub async fn run_ptp_node(
 
     // E2E delay state for collecting timestamps.
     let mut delay_state = E2eDelayState::new();
+    // Monotonic instant at which the current E2E cycle began (Sync arrival),
+    // so the measurement can be bracketed against clock steps.
+    let mut cycle_started_at: Option<Instant> = None;
 
     // Track the current master we are syncing to.
     let mut current_master: Option<PortIdentity> = None;
@@ -208,6 +213,7 @@ pub async fn run_ptp_node(
                             config.domain,
                             &our_port,
                             &mut delay_state,
+                            &mut cycle_started_at,
                             &mut pending_sync_seq,
                             &mut pending_sync_t2,
                             &mut current_master,
@@ -312,12 +318,13 @@ async fn handle_event_message(
     domain: u8,
     our_port: &PortIdentity,
     delay_state: &mut E2eDelayState,
+    cycle_started_at: &mut Option<Instant>,
     pending_sync_seq: &mut Option<u16>,
     pending_sync_t2: &mut Option<PtpTimestamp>,
     current_master: &mut Option<PortIdentity>,
     jitter_samples: &mut VecDeque<f64>,
     last_offset_ms: &mut Option<f64>,
-    measurement_tx: &mpsc::Sender<SourceMeasurement>,
+    measurement_tx: &mpsc::Sender<StampedMeasurement>,
 ) -> Result<()> {
     let msg = PtpMessage::parse(data).context("failed to parse PTP event message")?;
     let header = msg.header();
@@ -342,6 +349,7 @@ async fn handle_event_message(
             if current_master.is_none() || *current_master == Some(master) {
                 // Record T2 (receive time of Sync).
                 delay_state.set_sync_arrival(recv_time);
+                *cycle_started_at = Some(Instant::now());
 
                 if header.flags.has(PtpFlags::TWO_STEP) {
                     // Two-step: wait for FollowUp with T1.
@@ -431,12 +439,25 @@ async fn handle_event_message(
                     time: NtpTimestamp::now(),
                 };
 
-                if let Err(e) = measurement_tx.send(measurement).await {
+                // PTP offsets are computed from Sync/Follow_Up + Delay_Req
+                // timestamps gathered over the sync cycle; the cycle's
+                // monotonic window lets selection discard one that a clock
+                // step landed inside. PTP has no fixed cadence here, so the
+                // measurement does not expire on its own.
+                let finished_at = Instant::now();
+                let stamped = StampedMeasurement {
+                    started_at: cycle_started_at.unwrap_or(finished_at),
+                    finished_at,
+                    valid_for: None,
+                    measurement,
+                };
+                if let Err(e) = measurement_tx.send(stamped).await {
                     warn!("Failed to send PTP measurement: {}", e);
                 }
 
                 // Reset for next cycle.
                 delay_state.reset();
+                *cycle_started_at = None;
             }
         }
 

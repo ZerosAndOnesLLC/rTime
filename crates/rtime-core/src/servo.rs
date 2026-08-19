@@ -96,6 +96,9 @@ pub struct PiServo {
     /// step at startup; subsequent samples are clamped by the panic threshold.
     /// Not cleared by `reset()` — once we've stepped, we trust the clamp.
     has_stepped: bool,
+    /// Number of consecutive samples rejected by the panic clamp. Reset to
+    /// zero by any sample that passes the clamp.
+    consecutive_rejects: u32,
 }
 
 impl PiServo {
@@ -109,6 +112,7 @@ impl PiServo {
             last_offset: None,
             sample_count: 0,
             has_stepped: false,
+            consecutive_rejects: 0,
         }
     }
 
@@ -130,6 +134,14 @@ impl PiServo {
     /// Number of samples processed so far.
     pub fn sample_count(&self) -> u32 {
         self.sample_count
+    }
+
+    /// Number of consecutive samples the panic clamp has rejected. A sample
+    /// that passes the clamp resets this to zero. Callers use it to decide
+    /// when a stranded clock should give up and restart (see
+    /// `clock.panic_restart_after`).
+    pub fn consecutive_rejects(&self) -> u32 {
+        self.consecutive_rejects
     }
 
     /// Process a new offset measurement and return the action to take.
@@ -164,15 +176,18 @@ impl PiServo {
                     offset_ns: offset_ns as i64,
                 };
             }
+            self.consecutive_rejects = self.consecutive_rejects.saturating_add(1);
             warn!(
-                "Rejecting implausible offset: {:.0} ns exceeds panic threshold {:.0} ns",
-                offset_ns, self.config.panic_threshold_ns
+                "Rejecting implausible offset: {:.0} ns exceeds panic threshold {:.0} ns \
+                 (consecutive rejects: {})",
+                offset_ns, self.config.panic_threshold_ns, self.consecutive_rejects
             );
             return ServoAction::Reject {
                 offset_ns: offset_ns as i64,
             };
         }
 
+        self.consecutive_rejects = 0;
         self.sample_count += 1;
 
         // Step detection: if offset is larger than the threshold, step the clock
@@ -699,6 +714,27 @@ mod tests {
         // Now a huge offset should be Rejected, not Stepped via bypass.
         let action = servo.sample(2_844_849_653_081.0, POLL_INTERVAL);
         assert!(matches!(action, ServoAction::Reject { .. }));
+    }
+
+    // ---------------------------------------------------------------
+    // Consecutive panic rejects are counted and cleared
+    // ---------------------------------------------------------------
+    #[test]
+    fn consecutive_rejects_count_and_reset() {
+        let mut servo = PiServo::new(ServoConfig {
+            allow_initial_step: false,
+            ..ServoConfig::default()
+        });
+        assert_eq!(servo.consecutive_rejects(), 0);
+        for expected in 1..=3 {
+            let action = servo.sample(5_000_000_000.0, POLL_INTERVAL);
+            assert!(matches!(action, ServoAction::Reject { .. }));
+            assert_eq!(servo.consecutive_rejects(), expected);
+        }
+        // A sample that passes the clamp clears the streak.
+        let action = servo.sample(1_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::None));
+        assert_eq!(servo.consecutive_rejects(), 0);
     }
 
     // ---------------------------------------------------------------

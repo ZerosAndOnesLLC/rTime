@@ -14,6 +14,7 @@ use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
 mod clock_discipline;
 mod daemon;
 mod management;
+mod measurement;
 mod ntp_client;
 mod ntp_server;
 mod ptp_node;

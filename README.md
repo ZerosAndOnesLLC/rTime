@@ -74,7 +74,9 @@ rTime is configured via a TOML file. See `rtime.toml` for a complete example.
 |-----|---------|-------------|
 | `discipline` | `true` | Enable clock adjustment |
 | `step_threshold_ms` | `128` | Offset threshold (ms) above which the clock is stepped instead of slewed |
-| `panic_threshold_ms` | `1000` | Offset threshold (ms) above which the daemon refuses to adjust (safety) |
+| `panic_threshold_ms` | `1000000` | Offset threshold (ms) above which the daemon refuses to adjust in steady state (safety; 1000 s, like `ntpd`) |
+| `allow_initial_step` | `true` | Permit one unrestricted step on the first measurement after start, bypassing `panic_threshold_ms` (like `ntpd -g`) |
+| `panic_restart_after` | `8` | After this many consecutive offsets refused by the panic clamp, exit with an error so the supervisor restarts the daemon and `allow_initial_step` can recover the clock. `0` disables |
 | `interface` | `"system"` | Clock interface (`system` for standard adjtime) |
 
 ### `[ntp]`

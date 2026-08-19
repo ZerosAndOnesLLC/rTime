@@ -44,6 +44,15 @@ pub struct ClockConfig {
     pub panic_threshold_ms: f64,
     #[serde(default = "default_true")]
     pub allow_initial_step: bool,
+    /// After this many *consecutive* offsets rejected by the panic clamp, the
+    /// daemon exits with an error so its supervisor (`daemon -R` / systemd
+    /// `Restart=`) restarts it and the `allow_initial_step` bypass can step
+    /// the clock back into range. Without this a clock that drifts past
+    /// `panic_threshold_ms` — e.g. after a long VM suspend — is stranded
+    /// forever. Mirrors chrony's `maxchange ... <exit>` and `ntpd -g`.
+    /// `0` disables the restart and just keeps logging. Default: 8.
+    #[serde(default = "default_panic_restart_after")]
+    pub panic_restart_after: u32,
     #[serde(default = "default_clock_interface")]
     pub interface: String,
 }
@@ -55,9 +64,14 @@ impl Default for ClockConfig {
             step_threshold_ms: default_step_threshold_ms(),
             panic_threshold_ms: default_panic_threshold_ms(),
             allow_initial_step: true,
+            panic_restart_after: default_panic_restart_after(),
             interface: default_clock_interface(),
         }
     }
+}
+
+fn default_panic_restart_after() -> u32 {
+    8
 }
 
 fn default_true() -> bool {
