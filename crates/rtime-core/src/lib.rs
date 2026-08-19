@@ -15,6 +15,7 @@
 //! - [`selection`] — truechimer/falseticker source selection and clustering.
 //! - [`servo`] — the PI servo loop that drives clock discipline.
 //! - [`source`] — per-source measurement and identity types.
+//! - [`steps`] — ledger reconciling cached measurements with applied clock steps.
 
 pub mod clock;
 pub mod config;
@@ -23,4 +24,5 @@ pub mod marzullo;
 pub mod selection;
 pub mod servo;
 pub mod source;
+pub mod steps;
 pub mod timestamp;

@@ -1,10 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::sync::{RwLock, mpsc, watch};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use rtime_clock::unix::UnixClock;
 use rtime_core::clock::Clock;
@@ -12,12 +13,14 @@ use rtime_core::config::RtimeConfig;
 use rtime_core::selection::select_sources;
 use rtime_core::servo::ServoConfig;
 use rtime_core::source::{SourceId, SourceMeasurement};
+use rtime_core::steps::StepLedger;
 use rtime_core::timestamp::NtpDuration;
 use rtime_metrics::instruments;
 use rtime_ntp::server::ServerState;
 
-use crate::clock_discipline;
+use crate::clock_discipline::{self, DisciplineExit};
 use crate::management::{self, DaemonStatus, SourceStatus};
+use crate::measurement::StampedMeasurement;
 use crate::ntp_client;
 use crate::ntp_server;
 use crate::ptp_node;
@@ -32,10 +35,14 @@ const DEFAULT_POLL_INTERVAL_SECS: f64 = 64.0;
 /// the source selection loop, and the clock discipline task.
 pub struct Daemon {
     config: Arc<RtimeConfig>,
-    measurement_tx: Option<mpsc::Sender<SourceMeasurement>>,
-    measurement_rx: mpsc::Receiver<SourceMeasurement>,
+    measurement_tx: Option<mpsc::Sender<StampedMeasurement>>,
+    measurement_rx: mpsc::Receiver<StampedMeasurement>,
     offset_tx: watch::Sender<Option<NtpDuration>>,
     offset_rx: watch::Receiver<Option<NtpDuration>>,
+    /// Ledger of clock steps applied by the discipline task, consulted by the
+    /// selection loop to reconcile measurements taken before a step.
+    step_tx: watch::Sender<StepLedger>,
+    step_rx: watch::Receiver<StepLedger>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     daemon_status: Arc<RwLock<DaemonStatus>>,
@@ -48,6 +55,7 @@ impl Daemon {
         let (measurement_tx, measurement_rx) = mpsc::channel(MEASUREMENT_CHANNEL_SIZE);
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (offset_tx, offset_rx) = watch::channel(None);
+        let (step_tx, step_rx) = watch::channel(StepLedger::new());
 
         Self {
             config: Arc::new(config),
@@ -55,6 +63,8 @@ impl Daemon {
             measurement_rx,
             offset_tx,
             offset_rx,
+            step_tx,
+            step_rx,
             shutdown_tx,
             shutdown_rx,
             daemon_status: Arc::new(RwLock::new(DaemonStatus::new())),
@@ -271,12 +281,20 @@ impl Daemon {
             None
         };
 
-        // Spawn clock discipline task if enabled.
+        // Spawn clock discipline task if enabled. If it reports the clock as
+        // stranded (panic clamp tripping repeatedly), it requests shutdown and
+        // `run` returns an error so the supervisor restarts us with the
+        // `allow_initial_step` bypass armed.
+        let fatal: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
         let discipline_handle = if self.config.clock.discipline {
             let clock: Arc<dyn Clock> = Arc::new(UnixClock::new());
             let offset_rx = self.offset_rx.clone();
+            let step_tx = self.step_tx.clone();
             let shutdown = self.shutdown_rx.clone();
+            let shutdown_tx = self.shutdown_tx.clone();
             let metrics_enabled = self.config.metrics.enabled;
+            let panic_restart_after = self.config.clock.panic_restart_after;
+            let fatal = Arc::clone(&fatal);
 
             let servo_config = ServoConfig {
                 step_threshold_ns: self.config.clock.step_threshold_ms * 1_000_000.0,
@@ -286,25 +304,39 @@ impl Daemon {
             };
 
             info!(
-                "Clock discipline enabled (adjustable={}, step_threshold={:.0}ms, panic_threshold={:.0}ms, allow_initial_step={})",
+                "Clock discipline enabled (adjustable={}, step_threshold={:.0}ms, panic_threshold={:.0}ms, allow_initial_step={}, panic_restart_after={})",
                 clock.is_adjustable(),
                 self.config.clock.step_threshold_ms,
                 self.config.clock.panic_threshold_ms,
                 self.config.clock.allow_initial_step,
+                panic_restart_after,
             );
 
             let handle = tokio::spawn(async move {
-                if let Err(e) = clock_discipline::run_clock_discipline(
+                let exit = clock_discipline::run_clock_discipline(
                     clock,
                     offset_rx,
+                    step_tx,
                     DEFAULT_POLL_INTERVAL_SECS,
                     servo_config,
+                    panic_restart_after,
                     shutdown,
                     metrics_enabled,
                 )
-                .await
+                .await;
+                if let DisciplineExit::PanicStranded {
+                    rejects,
+                    last_offset_ns,
+                } = exit
                 {
-                    error!("Clock discipline task exited with error: {}", e);
+                    if let Ok(mut slot) = fatal.lock() {
+                        *slot = Some(format!(
+                            "clock stranded: {} consecutive offsets exceeded the panic \
+                             threshold (last {} ns); restarting for allow_initial_step",
+                            rejects, last_offset_ns
+                        ));
+                    }
+                    let _ = shutdown_tx.send(true);
                 }
             });
 
@@ -368,6 +400,12 @@ impl Daemon {
             let _ = handle.await;
         }
 
+        let fatal_reason = fatal.lock().ok().and_then(|slot| slot.clone());
+        if let Some(reason) = fatal_reason {
+            error!("rTime daemon stopping with error: {}", reason);
+            bail!(reason);
+        }
+
         info!("rTime daemon stopped");
         Ok(())
     }
@@ -383,15 +421,18 @@ impl Daemon {
         ready: Arc<AtomicBool>,
     ) {
         // Collect recent measurements per source. We keep the latest measurement
-        // from each source for the selection algorithm.
-        let mut latest_measurements: std::collections::HashMap<String, SourceMeasurement> =
+        // from each source for the selection algorithm. Entries are raw as
+        // measured; `usable_measurements` reconciles them against the step
+        // ledger and expiry at selection time.
+        let mut latest_measurements: std::collections::HashMap<String, StampedMeasurement> =
             std::collections::HashMap::new();
 
         let mut shutdown = self.shutdown_rx.clone();
 
         loop {
             tokio::select! {
-                Some(measurement) = self.measurement_rx.recv() => {
+                Some(stamped) = self.measurement_rx.recv() => {
+                    let measurement = &stamped.measurement;
                     let source_key = measurement.id.to_string();
                     let offset_ms = measurement.offset.to_millis_f64();
                     let delay_ms = measurement.delay.to_millis_f64();
@@ -402,11 +443,16 @@ impl Daemon {
                         source_key, offset_ms, delay_ms, jitter, measurement.stratum,
                     );
 
-                    latest_measurements.insert(source_key, measurement);
+                    latest_measurements.insert(source_key, stamped);
 
-                    // Run source selection on all latest measurements.
-                    let measurements: Vec<SourceMeasurement> =
-                        latest_measurements.values().cloned().collect();
+                    // Run source selection on every cached measurement that is
+                    // still trustworthy after the clock steps applied since it
+                    // was taken.
+                    let measurements = usable_measurements(
+                        &mut latest_measurements,
+                        &self.step_rx.borrow(),
+                        Instant::now(),
+                    );
 
                     if !measurements.is_empty() {
                         let result = select_sources(&measurements);
@@ -537,6 +583,56 @@ impl Daemon {
     }
 }
 
+/// Reconcile the cached per-source measurements with the clock steps applied
+/// since each was taken, dropping the ones that can no longer be trusted.
+///
+/// - Expired entries (source silent for longer than its validity window) are
+///   evicted so a dead source cannot keep voting with stale data.
+/// - Entries whose exchange straddled a step, or that predate the ledger
+///   horizon, are evicted: their offsets mix pre- and post-step timestamps.
+/// - Entries taken before a step have the step removed from their offset, so a
+///   correction is never re-applied from a stale cache (the doubling failure
+///   this guards against is described in [`rtime_core::steps`]).
+fn usable_measurements(
+    cache: &mut std::collections::HashMap<String, StampedMeasurement>,
+    ledger: &StepLedger,
+    now: Instant,
+) -> Vec<SourceMeasurement> {
+    let mut usable = Vec::with_capacity(cache.len());
+    cache.retain(|key, stamped| {
+        if stamped.is_expired(now) {
+            debug!("Dropping expired measurement from {}", key);
+            return false;
+        }
+        match ledger.correct(
+            stamped.started_at,
+            stamped.finished_at,
+            stamped.measurement.offset,
+        ) {
+            Some(offset) => {
+                let mut m = stamped.measurement.clone();
+                if offset != m.offset {
+                    debug!(
+                        "Measurement from {} predates a clock step; offset {} -> {}",
+                        key, m.offset, offset
+                    );
+                    m.offset = offset;
+                }
+                usable.push(m);
+                true
+            }
+            None => {
+                debug!(
+                    "Dropping measurement from {}: its exchange overlapped a clock step",
+                    key
+                );
+                false
+            }
+        }
+    });
+    usable
+}
+
 /// Resolve an NTP source address string to a SocketAddr.
 /// Supports "host:port" or just "host" (defaults to port 123).
 fn resolve_source_addr(address: &str) -> Result<SocketAddr> {
@@ -566,4 +662,151 @@ fn bind_tcp_reuseaddr(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListen
     socket.set_reuseaddr(true)?;
     socket.bind(addr)?;
     socket.listen(1024)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    use rtime_core::clock::LeapIndicator;
+    use rtime_core::timestamp::NtpTimestamp;
+
+    fn ntp_measurement(
+        n: u8,
+        offset_ms: i64,
+        started_at: Instant,
+        rtt: Duration,
+    ) -> StampedMeasurement {
+        StampedMeasurement {
+            started_at,
+            finished_at: started_at + rtt,
+            valid_for: Some(Duration::from_secs(128)),
+            measurement: SourceMeasurement {
+                id: SourceId::Ntp {
+                    address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, n)), 123),
+                    reference_id: u32::from(n),
+                },
+                offset: NtpDuration::from_millis(offset_ms),
+                delay: NtpDuration::from_millis(10),
+                dispersion: NtpDuration::from_millis(1),
+                jitter: 0.001,
+                stratum: 2,
+                leap_indicator: LeapIndicator::NoWarning,
+                root_delay: NtpDuration::from_millis(5),
+                root_dispersion: NtpDuration::from_millis(1),
+                time: NtpTimestamp::ZERO,
+            },
+        }
+    }
+
+    fn cache_of(items: Vec<StampedMeasurement>) -> HashMap<String, StampedMeasurement> {
+        items
+            .into_iter()
+            .map(|m| (m.measurement.id.to_string(), m))
+            .collect()
+    }
+
+    /// The production failure: three sources report +130ms, the servo steps
+    /// +130ms on the first selection, then the two cached measurements from
+    /// the other sources are re-selected. Before the ledger they re-elected
+    /// +130ms and the clock was stepped again (and again), doubling the error
+    /// every round. Now they must read ~0 and no further step can result.
+    #[test]
+    fn stale_cache_is_corrected_after_step() {
+        let t0 = Instant::now();
+        let rtt = Duration::from_millis(10);
+        let mut cache = cache_of(vec![
+            ntp_measurement(1, 130, t0, rtt),
+            ntp_measurement(2, 131, t0 + Duration::from_millis(1), rtt),
+            ntp_measurement(3, 129, t0 + Duration::from_millis(2), rtt),
+        ]);
+
+        // Before the step, selection sees the real +130ms consensus.
+        let ledger = StepLedger::new();
+        let before = usable_measurements(&mut cache, &ledger, t0 + Duration::from_millis(20));
+        assert_eq!(before.len(), 3);
+        let sel = select_sources(&before);
+        assert!((sel.system_offset.to_millis_f64() - 130.0).abs() < 2.0);
+
+        // The discipline task steps the clock by the selected offset.
+        let mut ledger = StepLedger::new();
+        let step_at = t0 + Duration::from_millis(50);
+        ledger.record(
+            step_at,
+            step_at + Duration::from_micros(30),
+            sel.system_offset,
+        );
+
+        // Re-running selection over the same cache must now show the residual only.
+        let after = usable_measurements(&mut cache, &ledger, t0 + Duration::from_millis(60));
+        assert_eq!(
+            after.len(),
+            3,
+            "pre-step measurements stay usable, corrected"
+        );
+        let sel2 = select_sources(&after);
+        assert!(
+            sel2.system_offset.to_millis_f64().abs() < 2.0,
+            "stale cache must not re-elect the old offset, got {}ms",
+            sel2.system_offset.to_millis_f64()
+        );
+        assert!(
+            sel2.system_offset.abs() < NtpDuration::from_millis(128),
+            "residual must be below the step threshold so no second step occurs"
+        );
+    }
+
+    #[test]
+    fn measurement_spanning_step_is_evicted() {
+        let t0 = Instant::now();
+        let mut cache = cache_of(vec![
+            ntp_measurement(1, 130, t0, Duration::from_millis(100)), // spans the step
+            ntp_measurement(
+                2,
+                131,
+                t0 + Duration::from_millis(200),
+                Duration::from_millis(10),
+            ),
+        ]);
+        let mut ledger = StepLedger::new();
+        let step_at = t0 + Duration::from_millis(50);
+        ledger.record(
+            step_at,
+            step_at + Duration::from_micros(30),
+            NtpDuration::from_millis(130),
+        );
+
+        let usable = usable_measurements(&mut cache, &ledger, t0 + Duration::from_millis(300));
+        assert_eq!(usable.len(), 1);
+        assert_eq!(
+            cache.len(),
+            1,
+            "spanning entry is removed from the cache for good"
+        );
+        assert!(cache.keys().all(|k| k.ends_with("10.0.0.2:123")));
+        // Taken after the step: untouched.
+        assert_eq!(usable[0].offset, NtpDuration::from_millis(131));
+    }
+
+    #[test]
+    fn expired_measurement_is_evicted() {
+        let t0 = Instant::now();
+        let mut cache = cache_of(vec![
+            ntp_measurement(1, 5, t0, Duration::from_millis(10)),
+            ntp_measurement(
+                2,
+                6,
+                t0 + Duration::from_secs(100),
+                Duration::from_millis(10),
+            ),
+        ]);
+        let ledger = StepLedger::new();
+        // 130s later: source 1 (valid for 128s) has gone silent too long.
+        let usable = usable_measurements(&mut cache, &ledger, t0 + Duration::from_secs(130));
+        assert_eq!(usable.len(), 1);
+        assert!(cache.keys().all(|k| k.ends_with("10.0.0.2:123")));
+    }
 }

@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Clock steps no longer snowball.** Source selection re-ran over the cached
+  latest measurement from every source, including measurements taken *before*
+  the servo's most recent step. Each stale entry re-elected the old offset and
+  the servo stepped again, so with three sources every correction was applied
+  ~3× and the error doubled each round (130 ms → −252 ms → 513 ms → … → 18 min)
+  until it exceeded the panic threshold and the clock was stranded. The
+  discipline task now records every step in a `StepLedger` (`rtime_core::steps`)
+  keyed on the monotonic clock, and selection reconciles each cached
+  measurement against it: measurements completed before a step have the step
+  removed from their offset, measurements whose exchange straddled a step are
+  discarded.
+- A source that stops answering no longer keeps voting with its last
+  measurement forever: NTP measurements expire after eight missed polls
+  (mirrors the NTP reachability register).
+
+### Added
+
+- `clock.panic_restart_after` (default `8`): after that many consecutive
+  offsets refused by the panic clamp the daemon exits with an error so its
+  supervisor (`daemon -R`, systemd `Restart=`) restarts it and
+  `allow_initial_step` can step the clock back into range, instead of logging
+  "Refused implausible offset" forever. `0` restores the old behaviour.
+- `PiServo::consecutive_rejects()`.
+
 ## [0.14.2]
 
 ### Changed

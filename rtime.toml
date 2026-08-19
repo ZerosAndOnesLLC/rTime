@@ -12,6 +12,10 @@ panic_threshold_ms = 1000000
 # Equivalent to `ntpd -g`. Lets the clock recover after a cold boot or long
 # VM suspend where real-world offset can exceed any sane steady-state guard.
 allow_initial_step = true
+# If the panic clamp refuses this many offsets in a row the clock is stranded
+# out of range (e.g. after a long VM suspend); exit so the supervisor restarts
+# the daemon and `allow_initial_step` steps it back. 0 = never exit.
+panic_restart_after = 8
 interface = "system"
 
 [ntp]

@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use tokio::net::UdpSocket;
@@ -12,6 +13,8 @@ use rtime_metrics::instruments;
 use rtime_ntp::client;
 use rtime_ntp::packet::{NTP_HEADER_SIZE, NtpPacket};
 
+use crate::measurement::StampedMeasurement;
+
 /// Number of initial burst queries at a fast interval.
 const INITIAL_BURST_COUNT: u32 = 4;
 
@@ -20,6 +23,11 @@ const INITIAL_BURST_INTERVAL_SECS: u64 = 8;
 
 /// Socket read timeout (seconds).
 const RECV_TIMEOUT_SECS: u64 = 5;
+
+/// A measurement stays usable for this many missed polls before the selection
+/// loop stops considering the source. Mirrors NTP's 8-bit reachability
+/// register: a source that has not answered for eight polls is unreachable.
+const MEASUREMENT_TTL_POLLS: u32 = 8;
 
 /// Run an async NTP client task that periodically polls an upstream server
 /// and sends measurements on the provided channel.
@@ -35,7 +43,7 @@ const RECV_TIMEOUT_SECS: u64 = 5;
 /// Respects the shutdown signal and exits cleanly when triggered.
 pub async fn run_ntp_client(
     server_addr: SocketAddr,
-    measurement_tx: mpsc::Sender<SourceMeasurement>,
+    measurement_tx: mpsc::Sender<StampedMeasurement>,
     mut shutdown: watch::Receiver<bool>,
     metrics_enabled: bool,
     min_poll: i8,
@@ -73,9 +81,12 @@ pub async fn run_ntp_client(
             normal_poll_secs
         };
 
-        // Perform a single NTP query.
+        // Perform a single NTP query. Bracket it on the monotonic clock so the
+        // selection loop can tell whether a clock step landed inside it.
+        let started_at = Instant::now();
         match query_server(&socket, server_addr).await {
             Ok(result) => {
+                let finished_at = Instant::now();
                 let offset_ms = result.offset.to_millis_f64();
                 let delay_ms = result.delay.to_millis_f64();
 
@@ -128,8 +139,16 @@ pub async fn run_ntp_client(
                     root_dispersion: result.root_dispersion,
                     time: NtpTimestamp::now(),
                 };
+                let stamped = StampedMeasurement {
+                    started_at,
+                    finished_at,
+                    valid_for: Some(Duration::from_secs(
+                        interval_secs.saturating_mul(u64::from(MEASUREMENT_TTL_POLLS)),
+                    )),
+                    measurement,
+                };
 
-                if let Err(e) = measurement_tx.send(measurement).await {
+                if let Err(e) = measurement_tx.send(stamped).await {
                     warn!("Failed to send measurement (receiver dropped): {}", e);
                     break;
                 }
