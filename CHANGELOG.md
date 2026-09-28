@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1]
+
+### Changed
+
+- Updated all dependencies to the latest semver-compatible stable versions
+  (rustls 0.23.45, clap 4.6.7, hyper 1.11.1, h2 0.4.19, thiserror 2.0.21,
+  toml 1.1.6, rand 0.10.3, among others). No API or wire-format changes.
+- `rtime-nts`: NTS-KE protocol/AEAD ID parsing uses `as_chunks` instead of
+  `chunks_exact` (no behaviour change).
+
 ## [0.15.0]
 
 ### Fixed
