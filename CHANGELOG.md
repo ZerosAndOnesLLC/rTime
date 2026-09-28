@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- **MSRV raised from 1.88 to 1.89.** `aes` 0.9.3 (used by `aes-siv` for NTS)
+  now requires rustc 1.89.
 - Updated all dependencies to the latest semver-compatible stable versions
   (rustls 0.23.45, clap 4.6.7, hyper 1.11.1, h2 0.4.19, thiserror 2.0.21,
   toml 1.1.6, rand 0.10.3, among others). No API or wire-format changes.

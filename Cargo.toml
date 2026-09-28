@@ -15,7 +15,7 @@ resolver = "2"
 [workspace.package]
 version = "0.15.1"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 license = "MIT"
 authors = ["Zeros And Ones LLC"]
 repository = "https://github.com/ZerosAndOnesLLC/rTime"
