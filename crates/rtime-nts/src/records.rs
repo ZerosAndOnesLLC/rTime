@@ -208,16 +208,20 @@ impl NtsKeRecord {
     /// Extract protocol IDs from a NextProtocol record body.
     pub fn protocol_ids(&self) -> Vec<u16> {
         self.body
-            .chunks_exact(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|chunk| u16::from_be_bytes(*chunk))
             .collect()
     }
 
     /// Extract AEAD algorithm IDs from an AeadAlgorithm record body.
     pub fn algorithm_ids(&self) -> Vec<u16> {
         self.body
-            .chunks_exact(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|chunk| u16::from_be_bytes(*chunk))
             .collect()
     }
 }
