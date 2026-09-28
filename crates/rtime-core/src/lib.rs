@@ -17,6 +17,8 @@
 //! - [`source`] — per-source measurement and identity types.
 //! - [`steps`] — ledger reconciling cached measurements with applied clock steps.
 
+#![forbid(unsafe_code)]
+
 pub mod clock;
 pub mod config;
 pub mod filter;

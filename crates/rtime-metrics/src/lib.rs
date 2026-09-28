@@ -12,6 +12,8 @@
 //!
 //! The [`metrics`] facade crate is re-exported for convenience.
 
+#![forbid(unsafe_code)]
+
 pub mod exporter;
 pub mod instruments;
 

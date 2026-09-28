@@ -15,6 +15,8 @@
 //! - [`port`] — PTP port state machine.
 //! - [`tlv`] — TLV (type-length-value) extension encoding.
 
+#![forbid(unsafe_code)]
+
 pub mod announce;
 pub mod bmca;
 pub mod dataset;
