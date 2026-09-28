@@ -71,12 +71,7 @@ impl TimestampCapabilities {
         }
 
         // Verify interface exists using if_nametoindex.
-        use std::ffi::CString;
-        let c_name = CString::new(interface_name).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid interface name")
-        })?;
-        let idx = unsafe { libc::if_nametoindex(c_name.as_ptr()) };
-        if idx == 0 {
+        if nix::net::if_::if_nametoindex(interface_name).is_err() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("interface not found: {interface_name}"),
@@ -143,9 +138,9 @@ mod ethtool {
     pub const SOF_TIMESTAMPING_RX_HARDWARE: u32 = 1 << 2;
     pub const SOF_TIMESTAMPING_RX_SOFTWARE: u32 = 1 << 3;
 
-    /// Kernel struct `ethtool_ts_info` (simplified -- we only read the first fields).
-    /// See linux/ethtool.h.
+    /// Kernel struct `ethtool_ts_info`. See linux/ethtool.h.
     #[repr(C)]
+    #[derive(Default)]
     pub struct EthtoolTsInfo {
         pub cmd: u32,
         pub so_timestamping: u32,
@@ -155,27 +150,15 @@ mod ethtool {
         pub rx_filters: u32,
         pub rx_reserved: [u32; 3],
     }
-
-    /// Kernel struct `ifreq` -- 40 bytes on x86_64.
-    /// We only use `ifr_name` (first 16 bytes) and `ifr_data` (pointer at offset 16).
-    #[repr(C)]
-    pub struct Ifreq {
-        pub ifr_name: [u8; libc::IFNAMSIZ],
-        pub ifr_data: *mut libc::c_void,
-    }
 }
 
 /// Attempt to query timestamping capabilities via SIOCETHTOOL ioctl (Linux only).
 #[cfg(target_os = "linux")]
 fn query_ethtool_ts_info(interface_name: &str) -> std::io::Result<TimestampCapabilities> {
     use ethtool::*;
+    use nix::sys::socket::{AddressFamily, SockFlag, SockType, socket};
+    use std::os::fd::AsRawFd;
 
-    let mut ts_info: EthtoolTsInfo = unsafe { std::mem::zeroed() };
-    ts_info.cmd = ETHTOOL_GET_TS_INFO;
-
-    let mut ifr: Ifreq = unsafe { std::mem::zeroed() };
-
-    // Copy interface name into the fixed buffer.
     let name_bytes = interface_name.as_bytes();
     if name_bytes.len() >= libc::IFNAMSIZ {
         return Err(std::io::Error::new(
@@ -183,26 +166,39 @@ fn query_ethtool_ts_info(interface_name: &str) -> std::io::Result<TimestampCapab
             "interface name too long",
         ));
     }
-    ifr.ifr_name[..name_bytes.len()].copy_from_slice(name_bytes);
-    // NUL terminator is already there because we zeroed the struct.
 
-    ifr.ifr_data = &mut ts_info as *mut EthtoolTsInfo as *mut libc::c_void;
+    let mut ts_info = EthtoolTsInfo {
+        cmd: ETHTOOL_GET_TS_INFO,
+        ..Default::default()
+    };
 
-    // Open a temporary socket for the ioctl.
-    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error());
+    // The kernel copies a full `struct ifreq` in and back out, so this must
+    // be the real `libc::ifreq` (40 bytes on x86_64), not a truncated
+    // name + pointer struct.
+    // SAFETY: `libc::ifreq` is `#[repr(C)]` plain data (a byte array and a
+    // union of integers, sockaddrs and a pointer); all-zero is valid for
+    // every field and leaves `ifr_name` NUL-terminated.
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    for (dst, &src) in ifr.ifr_name.iter_mut().zip(name_bytes) {
+        *dst = src as libc::c_char;
     }
+    ifr.ifr_ifru.ifru_data = (&raw mut ts_info).cast();
 
-    let ret = unsafe { libc::ioctl(fd, SIOCETHTOOL, &mut ifr) };
-    let errno = std::io::Error::last_os_error();
+    // Temporary socket for the ioctl; closed when `sock` drops.
+    let sock = socket(
+        AddressFamily::Inet,
+        SockType::Datagram,
+        SockFlag::SOCK_CLOEXEC,
+        None,
+    )?;
 
-    unsafe {
-        libc::close(fd);
-    }
-
+    // SAFETY: `ifr` is a correctly sized `struct ifreq` with a NUL-terminated
+    // name, and `ifru_data` points at `ts_info`, a live `#[repr(C)]`
+    // `ethtool_ts_info` that the kernel fills in. Both outlive the call and
+    // are not otherwise borrowed while it runs.
+    let ret = unsafe { libc::ioctl(sock.as_raw_fd(), SIOCETHTOOL, &raw mut ifr) };
     if ret < 0 {
-        return Err(errno);
+        return Err(std::io::Error::last_os_error());
     }
 
     let so_ts = ts_info.so_timestamping;

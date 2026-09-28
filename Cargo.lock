@@ -1214,6 +1214,7 @@ dependencies = [
  "libc",
  "nix",
  "rtime-core",
+ "socket2",
  "thiserror",
  "tokio",
 ]

@@ -14,7 +14,6 @@
 
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -76,10 +75,7 @@ pub fn acquire_at(path: &Path) -> Result<InstanceLock, InstanceLockError> {
         l_sysid: 0,
     };
 
-    let fd = file.as_raw_fd();
-    let res = unsafe { nix::libc::fcntl(fd, nix::libc::F_SETLK, &flock) };
-    if res == -1 {
-        let errno = nix::errno::Errno::last();
+    if let Err(errno) = nix::fcntl::fcntl(&file, nix::fcntl::FcntlArg::F_SETLK(&flock)) {
         if matches!(errno, nix::errno::Errno::EAGAIN | nix::errno::Errno::EACCES) {
             // Read the recorded PID for the error message.
             let mut buf = String::new();

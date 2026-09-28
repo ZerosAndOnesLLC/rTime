@@ -14,6 +14,8 @@
 //! - [`extension`] — NTP extension-field framing (used by NTS).
 //! - [`kiss_code`] — Kiss-o'-Death (KoD) codes such as `RATE` and `DENY`.
 
+#![forbid(unsafe_code)]
+
 pub mod client;
 pub mod extension;
 pub mod kiss_code;

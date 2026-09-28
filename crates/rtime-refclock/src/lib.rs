@@ -13,6 +13,8 @@
 //!
 //! The crate error type is [`RefClockError`].
 
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "gps")]
 pub mod gps;
 #[cfg(feature = "pps")]

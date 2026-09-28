@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::Path;
 use std::time::Duration;

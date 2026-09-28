@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Stack overwrite in the NIC timestamping probe (Linux).**
+  `TimestampCapabilities::query` passed a 24-byte hand-rolled `ifreq` to the
+  `SIOCETHTOOL` ioctl, but the kernel copies a full `struct ifreq` (40 bytes on
+  x86_64) in and back out, reading and rewriting 16 bytes of adjacent stack.
+  It now uses `libc::ifreq`.
+
+### Changed
+
+- `unsafe` reduced from 12 blocks to 6, all confined to two audited FFI
+  modules (`rtime-clock::adjtime`, `rtime-net::interface`):
+  - multicast interface selection uses `socket2`'s `set_multicast_if_v4`;
+  - the singleton lock uses nix's safe `fcntl(F_SETLK)`;
+  - the ethtool probe's temporary socket is an `OwnedFd` (closed on every
+    path) and FreeBSD interface lookup uses `nix::net::if_::if_nametoindex`.
+- `#![forbid(unsafe_code)]` on `rtimed`, `rtime-core`, `rtime-ntp`,
+  `rtime-nts`, `rtime-ptp`, `rtime-metrics` and `rtime-refclock`;
+  `#![deny(unsafe_code)]` on `rtime-clock` and `rtime-net`, with the FFI
+  module explicitly allowed.
+
 ## [0.15.1]
 
 ### Changed

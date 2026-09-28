@@ -11,6 +11,9 @@
 //! - [`multicast`] — multicast group membership (used by PTP).
 //! - [`interface`] — network interface enumeration and capability queries.
 
+#![deny(unsafe_code)]
+
+#[allow(unsafe_code)] // audited FFI; see module docs
 pub mod interface;
 pub mod multicast;
 pub mod udp;

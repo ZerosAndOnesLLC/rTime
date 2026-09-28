@@ -55,6 +55,7 @@ anyhow = "1"
 
 # System
 libc = "0.2"
+socket2 = "0.6"
 nix = { version = "0.31", features = ["time", "net", "ioctl", "fs", "process"] }
 
 # Crypto / TLS

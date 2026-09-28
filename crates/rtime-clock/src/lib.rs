@@ -12,6 +12,9 @@
 //! - [`phc`] — PTP hardware clock (PHC) access.
 //! - [`mock`] — an in-memory clock for testing.
 
+#![deny(unsafe_code)]
+
+#[allow(unsafe_code)] // audited FFI; see module docs
 pub mod adjtime;
 pub mod mock;
 pub mod phc;

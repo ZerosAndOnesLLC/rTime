@@ -7,7 +7,6 @@
 // on both Linux and FreeBSD via the `libc` crate.
 
 use std::net::Ipv4Addr;
-use std::os::unix::io::AsRawFd;
 
 use nix::sys::socket::{IpMembershipRequest, setsockopt, sockopt};
 use tokio::net::UdpSocket;
@@ -60,27 +59,8 @@ pub fn leave_multicast(
 ///
 /// This controls which local interface is used for sending multicast packets.
 pub fn set_multicast_interface(socket: &UdpSocket, interface: Ipv4Addr) -> std::io::Result<()> {
-    // nix 0.29 does not expose IP_MULTICAST_IF as a typed sockopt; fall back to libc.
-    let addr = libc::in_addr {
-        s_addr: u32::from_ne_bytes(interface.octets()),
-    };
-
-    let fd = socket.as_raw_fd();
-    let ret = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::IPPROTO_IP,
-            libc::IP_MULTICAST_IF,
-            &addr as *const libc::in_addr as *const libc::c_void,
-            std::mem::size_of::<libc::in_addr>() as libc::socklen_t,
-        )
-    };
-
-    if ret < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    Ok(())
+    // nix does not expose IP_MULTICAST_IF as a typed sockopt; socket2 does.
+    socket2::SockRef::from(socket).set_multicast_if_v4(&interface)
 }
 
 /// Disable multicast loopback on the socket.

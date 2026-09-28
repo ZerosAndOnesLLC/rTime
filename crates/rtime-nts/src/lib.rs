@@ -15,6 +15,8 @@
 //! Protocol constants (algorithm ids, ports, key lengths) and the crate error type
 //! [`NtsError`] are defined at the crate root.
 
+#![forbid(unsafe_code)]
+
 pub mod aead;
 pub mod cookie;
 pub mod ke;
