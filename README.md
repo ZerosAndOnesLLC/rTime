@@ -207,6 +207,12 @@ blocks are published as reusable library crates:
 | [`rtime-refclock`](https://crates.io/crates/rtime-refclock) | Reference clock drivers (GPS, PPS) |
 | [`rtime-metrics`](https://crates.io/crates/rtime-metrics) | Prometheus metrics exporter |
 
+## CI & Releases
+
+- **Pull requests** run checks only, on GitHub-hosted `ubuntu-latest` runners: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc`, and an MSRV (1.89) `cargo check`. No release builds or artifacts.
+- **Merges to `main`** don't re-run CI; the PR checks already covered the change.
+- **Releases** are cut with `gh release create v<version> --generate-notes`. This repo has no release build workflow, so a release triggers no CI.
+
 ## License
 
 MIT
