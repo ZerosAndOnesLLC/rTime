@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "Prometheus metrics exporter and instruments for the rTime NTP/PTP time synchronization daemon"
 documentation = "https://docs.rs/rtime-metrics"
 readme = "README.md"
@@ -14,7 +13,6 @@ keywords = ["prometheus", "metrics", "ntp", "monitoring", "time"]
 categories = ["network-programming", "date-and-time"]
 
 [dependencies]
-rtime-core = { workspace = true }
 axum = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }

@@ -136,9 +136,9 @@ impl ClockFilter {
     /// Find the sample in the window with the smallest delay.
     fn min_delay_sample(&self) -> FilterSample {
         let mut best = self.samples[0];
-        for i in 1..self.count {
-            if self.samples[i].delay < best.delay {
-                best = self.samples[i];
+        for sample in &self.samples[1..self.count] {
+            if sample.delay < best.delay {
+                best = *sample;
             }
         }
         best

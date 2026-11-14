@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "Reference clock drivers (GPS/NMEA, PPS pulse-per-second) for the rTime NTP/PTP time synchronization daemon"
 documentation = "https://docs.rs/rtime-refclock"
 readme = "README.md"
@@ -17,8 +16,6 @@ categories = ["hardware-support", "date-and-time"]
 rtime-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true }
-libc = { workspace = true }
 
 [features]
 default = []

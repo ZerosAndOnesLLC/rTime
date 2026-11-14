@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "PTP / IEEE 1588 protocol implementation: message codec, BMCA, announce/sync/delay handling, and TLVs for the rTime daemon"
 documentation = "https://docs.rs/rtime-ptp"
 readme = "README.md"

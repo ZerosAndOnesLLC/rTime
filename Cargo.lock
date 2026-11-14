@@ -1201,7 +1201,6 @@ dependencies = [
  "axum",
  "metrics",
  "metrics-exporter-prometheus",
- "rtime-core",
  "tokio",
  "tracing",
 ]
@@ -1222,7 +1221,6 @@ dependencies = [
 name = "rtime-ntp"
 version = "0.15.1"
 dependencies = [
- "rand 0.10.3",
  "rtime-core",
  "thiserror",
 ]
@@ -1233,12 +1231,8 @@ version = "0.15.1"
 dependencies = [
  "aes-siv",
  "rand 0.10.3",
- "rtime-core",
- "rustls",
- "rustls-pki-types",
  "sha2",
  "thiserror",
- "tokio",
  "tracing",
  "zeroize",
 ]
@@ -1255,10 +1249,8 @@ dependencies = [
 name = "rtime-refclock"
 version = "0.15.1"
 dependencies = [
- "libc",
  "rtime-core",
  "thiserror",
- "tokio",
  "tracing",
 ]
 
@@ -1294,7 +1286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
- "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",

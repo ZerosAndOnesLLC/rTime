@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "Network Time Security (NTS, RFC 8915): NTS-KE handshake, AEAD_AES_SIV_CMAC_256, and cookie handling for the rTime NTP daemon"
 documentation = "https://docs.rs/rtime-nts"
 readme = "README.md"
@@ -14,13 +13,9 @@ keywords = ["nts", "ntp", "security", "tls", "rfc8915"]
 categories = ["cryptography", "network-programming", "date-and-time"]
 
 [dependencies]
-rtime-core = { workspace = true }
 thiserror = { workspace = true }
-rustls = { workspace = true }
-rustls-pki-types = "1"
 aes-siv = { workspace = true }
 rand = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 zeroize = { version = "1", features = ["derive"] }
