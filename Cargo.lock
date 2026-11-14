@@ -1251,7 +1251,6 @@ version = "0.15.2"
 dependencies = [
  "rtime-core",
  "thiserror",
- "tracing",
 ]
 
 [[package]]

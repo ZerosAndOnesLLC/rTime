@@ -32,8 +32,9 @@ All notable changes to this project are documented here. The format is based on
   rustls-webpki 0.103.17, aes 0.9.4, mio 1.2.5, among others).
 - Removed unused dependencies: `rtime-nts` no longer depends on `rustls`,
   `rustls-pki-types`, `tokio` or `rtime-core`; `rtime-ntp` drops `rand`;
-  `rtime-refclock` drops `tokio` and `libc`; `rtime-metrics` drops
-  `rtime-core`. `rtimed` uses `rtime-nts` only as a dev-dependency.
+  `rtime-refclock` drops `tokio`, `libc` and `tracing`, and only pulls in
+  `rtime-core` when the `gps` or `pps` feature is enabled; `rtime-metrics`
+  drops `rtime-core`. `rtimed` uses `rtime-nts` only as a dev-dependency.
 - Dropped the redundant `homepage` manifest field (same as `repository`).
 - Docker image: builder `rust:1.100-trixie` (was `rust:1.86-bookworm`, below
   MSRV), runtime `debian:trixie-slim`.

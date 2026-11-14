@@ -13,11 +13,10 @@ keywords = ["gps", "pps", "refclock", "time", "ntp"]
 categories = ["hardware-support", "date-and-time"]
 
 [dependencies]
-rtime-core = { workspace = true }
+rtime-core = { workspace = true, optional = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [features]
 default = []
-gps = []
-pps = []
+gps = ["dep:rtime-core"]
+pps = ["dep:rtime-core"]
