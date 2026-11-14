@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.15.2]
+
 ### Fixed
 
 - **Stack overwrite in the NIC timestamping probe (Linux).**
@@ -26,6 +28,17 @@ All notable changes to this project are documented here. The format is based on
   `rtime-nts`, `rtime-ptp`, `rtime-metrics` and `rtime-refclock`;
   `#![deny(unsafe_code)]` on `rtime-clock` and `rtime-net`, with the FFI
   module explicitly allowed.
+- Updated all dependencies to the latest stable versions (toml 1.2.1,
+  rustls-webpki 0.103.17, aes 0.9.4, mio 1.2.5, among others).
+- Removed unused dependencies: `rtime-nts` no longer depends on `rustls`,
+  `rustls-pki-types`, `tokio` or `rtime-core`; `rtime-ntp` drops `rand`;
+  `rtime-refclock` drops `tokio` and `libc`; `rtime-metrics` drops
+  `rtime-core`. `rtimed` uses `rtime-nts` only as a dev-dependency.
+- Dropped the redundant `homepage` manifest field (same as `repository`).
+- Docker image: builder `rust:1.100-trixie` (was `rust:1.86-bookworm`, below
+  MSRV), runtime `debian:trixie-slim`.
+- CI: `cargo-deny` security checks (advisories, licenses, bans, sources) on
+  every PR and daily.
 
 ## [0.15.1]
 
@@ -117,6 +130,8 @@ All notable changes to this project are documented here. The format is based on
   registry when published.
 - Updated all dependencies to the latest stable, compatible versions.
 
+[0.15.2]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.15.2
+[0.15.1]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.15.1
 [0.15.0]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.15.0
 [0.14.2]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.2
 [0.14.1]: https://github.com/ZerosAndOnesLLC/rTime/releases/tag/v0.14.1
