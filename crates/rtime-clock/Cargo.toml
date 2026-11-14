@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "System clock interfaces (adjtime/adjtimex slew and step, PTP hardware clock) for the rTime NTP/PTP daemon"
 documentation = "https://docs.rs/rtime-clock"
 readme = "README.md"

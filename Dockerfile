@@ -1,9 +1,9 @@
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.100-trixie AS builder
 WORKDIR /build
 COPY . .
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y ca-certificates libcap2-bin && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/target/release/rtime /usr/bin/rtime
 RUN setcap 'cap_sys_time,cap_net_bind_service+ep' /usr/bin/rtime

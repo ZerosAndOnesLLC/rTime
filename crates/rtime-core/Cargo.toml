@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "Core types, clock algorithms (Marzullo source selection, PI servo, clock filter), and configuration for the rTime NTP/PTP time synchronization daemon"
 documentation = "https://docs.rs/rtime-core"
 readme = "README.md"

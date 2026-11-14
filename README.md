@@ -210,6 +210,7 @@ blocks are published as reusable library crates:
 ## CI & Releases
 
 - **Pull requests** run checks only, on GitHub-hosted `ubuntu-latest` runners: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo doc`, and an MSRV (1.89) `cargo check`. No release builds or artifacts.
+- **Security** (`.github/workflows/security.yml`) runs [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny) on every PR, daily, and on demand. It fails on RustSec advisories (vulnerable, unmaintained, unsound or yanked crates), non-permissive licenses, wildcard version requirements, and crates from anywhere but crates.io. Policy lives in `deny.toml`; run it locally with `cargo deny check`.
 - **Merges to `main`** don't re-run CI; the PR checks already covered the change.
 - **Releases** are cut with `gh release create v<version> --generate-notes`. This repo has no release build workflow, so a release triggers no CI.
 
