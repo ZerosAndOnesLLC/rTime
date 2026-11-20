@@ -39,18 +39,20 @@ pub enum DisciplineExit {
 /// [`DisciplineExit::PanicStranded`] once that many consecutive offsets have
 /// been refused by the panic clamp; `0` keeps the old behaviour of logging
 /// forever.
-#[allow(clippy::too_many_arguments)]
 pub async fn run_clock_discipline(
     clock: Arc<dyn Clock>,
     mut offset_rx: watch::Receiver<Option<SelectedOffset>>,
     step_tx: watch::Sender<StepLedger>,
-    poll_interval_secs: f64,
     config: ServoConfig,
     panic_restart_after: u32,
     mut shutdown: watch::Receiver<bool>,
     metrics_enabled: bool,
 ) -> DisciplineExit {
     let mut servo = PiServo::new(config);
+    // When the servo last took a sample: it integrates over the real interval
+    // between offsets, which depends on how many sources there are and how
+    // often they answer, not on a nominal poll interval.
+    let mut last_sample: Option<Instant> = None;
 
     if !clock.is_adjustable() {
         info!("Clock is not adjustable (no CAP_SYS_TIME) -- running in read-only mode");
@@ -75,7 +77,11 @@ pub async fn run_clock_discipline(
                     continue;
                 }
                 let offset_ns = offset.to_nanos() as f64;
-                let action = servo.sample(offset_ns, poll_interval_secs);
+                let now = Instant::now();
+                let interval_secs = last_sample
+                    .map_or(0.0, |prev| now.saturating_duration_since(prev).as_secs_f64());
+                last_sample = Some(now);
+                let action = servo.sample(offset_ns, interval_secs);
 
                 // Record clock offset and frequency metrics.
                 if metrics_enabled {
@@ -111,6 +117,12 @@ pub async fn run_clock_discipline(
                                     // selection loop sees it as early as possible.
                                     step_tx.send_modify(|ledger| ledger.record(before, after, step));
                                     info!("Clock stepped by {}", step);
+                                    // The servo kept its frequency estimate but
+                                    // dropped the pre-step phase term; hand the
+                                    // kernel just the estimate.
+                                    if let Err(e) = clock.adjust_frequency(servo.frequency()) {
+                                        warn!("Failed to adjust frequency after step: {}", e);
+                                    }
                                 }
                                 Err(e) => warn!("Failed to step clock: {}", e),
                             }

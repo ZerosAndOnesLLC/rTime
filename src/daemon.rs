@@ -27,9 +27,6 @@ use crate::ptp_node;
 /// Channel buffer size for source measurements.
 const MEASUREMENT_CHANNEL_SIZE: usize = 64;
 
-/// Default poll interval in seconds (matches NTP client normal poll).
-const DEFAULT_POLL_INTERVAL_SECS: f64 = 64.0;
-
 /// The daemon orchestrator. Spawns and manages NTP client tasks, the NTP server,
 /// the source selection loop, and the clock discipline task.
 pub struct Daemon {
@@ -316,7 +313,6 @@ impl Daemon {
                     clock,
                     offset_rx,
                     step_tx,
-                    DEFAULT_POLL_INTERVAL_SECS,
                     servo_config,
                     panic_restart_after,
                     shutdown,
