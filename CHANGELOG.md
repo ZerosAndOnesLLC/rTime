@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **Clock stepped back and forth by ~128 ms every few minutes (#73).** The
+  servo's FLL gains were dimensionally wrong and its integral had no
+  anti-windup, so it wound up to millions of PPM, pinned the kernel
+  frequency at +/-500 PPM and walked the clock into the step threshold
+  (~135 steps per 12 h). Each step also threw the frequency estimate away.
+  The PI loop now uses time-constant gains integrated over the real interval
+  between samples, bounds the integral by `max_frequency`, and keeps the
+  frequency estimate across steps.
+
 ## [0.15.2]
 
 ### Fixed

@@ -60,6 +60,11 @@ pub struct ServoConfig {
     pub init_samples: u32,
     /// Number of FLL samples before switching to PLL. Default: 8.
     pub fll_samples: u32,
+    /// Loop time constant in seconds. The proportional term removes an
+    /// offset over roughly this long in FLL (twice as long in PLL), and the
+    /// integral term (the frequency estimate) settles over a few multiples
+    /// of it. Default: 64.
+    pub time_constant_secs: f64,
 }
 
 impl Default for ServoConfig {
@@ -71,6 +76,7 @@ impl Default for ServoConfig {
             max_frequency: 500.0,
             init_samples: 4,
             fll_samples: 8,
+            time_constant_secs: 64.0,
         }
     }
 }
@@ -83,9 +89,11 @@ impl Default for ServoConfig {
 pub struct PiServo {
     config: ServoConfig,
     state: ServoState,
-    /// Accumulated integral term.
+    /// Integral term: the servo's estimate (PPM) of the frequency correction
+    /// the oscillator needs. Kept across steps; bounded by `max_frequency`.
     integral: f64,
-    /// Current frequency offset estimate (PPM).
+    /// Frequency correction most recently commanded (PPM): integral plus
+    /// the proportional phase term.
     frequency: f64,
     /// Previous offset for derivative calculation (ns).
     last_offset: Option<f64>,
@@ -147,11 +155,13 @@ impl PiServo {
     /// Process a new offset measurement and return the action to take.
     ///
     /// # Arguments
-    /// - `offset_ns`: measured clock offset in nanoseconds (positive means local
-    ///   clock is ahead).
-    /// - `poll_interval_secs`: current polling interval in seconds (tau). This
-    ///   controls the PI gain scaling.
-    pub fn sample(&mut self, offset_ns: f64, poll_interval_secs: f64) -> ServoAction {
+    /// - `offset_ns`: measured clock offset in nanoseconds (reference minus
+    ///   local: positive means the local clock is behind and must speed up or
+    ///   be stepped forward).
+    /// - `interval_secs`: seconds since the previous sample, i.e. how long the
+    ///   previously commanded frequency has been acting. Values outside
+    ///   `0..=time constant` (or non-finite) are clamped.
+    pub fn sample(&mut self, offset_ns: f64, interval_secs: f64) -> ServoAction {
         // Panic clamp: reject implausibly large offsets before they touch any
         // state. A real drift this large doesn't occur on a running kernel;
         // a value this big means the measurement is corrupt, spoofed, or the
@@ -171,7 +181,7 @@ impl PiServo {
                     offset_ns, self.config.panic_threshold_ns
                 );
                 self.has_stepped = true;
-                self.reset();
+                self.restart_after_step();
                 return ServoAction::Step {
                     offset_ns: offset_ns as i64,
                 };
@@ -191,10 +201,12 @@ impl PiServo {
         self.sample_count += 1;
 
         // Step detection: if offset is larger than the threshold, step the clock
-        // and reset state so the servo re-converges from scratch.
+        // and restart the phase loop. The frequency estimate survives: a step
+        // fixes the phase, not the oscillator, and throwing the estimate away
+        // only makes the clock drift straight back out (#73).
         if offset_ns.abs() > self.config.step_threshold_ns {
             self.has_stepped = true;
-            self.reset();
+            self.restart_after_step();
             return ServoAction::Step {
                 offset_ns: offset_ns as i64,
             };
@@ -211,8 +223,6 @@ impl PiServo {
             self.state = ServoState::FrequencyLock;
         }
 
-        let tau = poll_interval_secs;
-
         // Determine number of samples in the active (non-init) phase.
         let active_samples = self.sample_count - self.config.init_samples;
 
@@ -221,46 +231,42 @@ impl PiServo {
             self.state = ServoState::PhaseLock;
         }
 
-        // Compute PI gains based on the current operating mode.
+        // Continuous-time PI loop on the phase offset theta (seconds), where
+        // the local clock runs at (natural error + commanded frequency):
         //
-        // The controller works in the offset domain (nanoseconds) and produces a
-        // frequency correction in PPM.  A conversion factor of 1e-3/tau translates
-        // from "nanoseconds per tau-seconds" into PPM:
-        //   1 ns offset / tau s  =  1e-9 / tau  fractional freq
-        //   * 1e6  =  1e-3 / tau  PPM
-        let (kp, ki) = match self.state {
-            ServoState::FrequencyLock => {
-                // FLL: large gains for fast convergence.
-                //   raw Kp = 2*tau,  raw Ki = tau^2
-                //   scaled by 1e-3/tau to convert ns -> PPM.
-                let scale = 1.0e-3 / tau;
-                (2.0 * tau * scale, tau * tau * scale)
-            }
-            ServoState::PhaseLock => {
-                // PLL: smaller gains for fine-grained tracking.
-                //   raw Kp = 0.7/tau,  raw Ki = Kp^2 / 4
-                //   scaled by 1e-3/tau to convert ns -> PPM.
-                let scale = 1.0e-3 / tau;
-                let kp_raw = 0.7 / tau;
-                let ki_raw = kp_raw * kp_raw / 4.0;
-                (kp_raw * scale, ki_raw * scale)
-            }
+        //   freq = theta / Tp + I,      dI/dt = theta / Ti^2
+        //
+        // which gives theta'' + theta'/Tp + theta/Ti^2 = 0 -- critically
+        // damped for Ti = 2 Tp, settling with I equal to minus the
+        // oscillator's natural error and theta at zero. Gains are expressed
+        // per second and integrated over the real sample interval, so they
+        // do not depend on how often the selection loop publishes offsets.
+        //
+        // FLL uses the short time constant to capture the frequency quickly;
+        // PLL doubles it to filter measurement jitter while tracking.
+        let tau = self.config.time_constant_secs.max(1.0);
+        let tp = match self.state {
+            ServoState::FrequencyLock => tau,
+            ServoState::PhaseLock => 2.0 * tau,
             ServoState::Init => unreachable!(),
         };
+        let ti = 2.0 * tp;
+        let dt = if interval_secs.is_finite() {
+            interval_secs.clamp(0.0, tp)
+        } else {
+            0.0
+        };
 
-        // Update integral term.
-        self.integral += offset_ns * ki;
+        // ns -> fractional frequency -> PPM: x ns / y s = x * 1e-9 / y = x * 1e-3 / y PPM.
+        let max = self.config.max_frequency;
+        // Anti-windup: the integral is the frequency estimate and can never
+        // usefully exceed what the kernel will accept. An unbounded integral
+        // (as before #73) wound up to millions of PPM, pinned the frequency at
+        // the clamp and walked the clock into the step threshold forever.
+        self.integral = (self.integral + offset_ns * 1.0e-3 * dt / (ti * ti)).clamp(-max, max);
+        let proportional = offset_ns * 1.0e-3 / tp;
 
-        // Proportional term.
-        let proportional = offset_ns * kp;
-
-        // Total correction.
-        self.frequency = proportional + self.integral;
-
-        // Clamp to maximum allowed frequency.
-        self.frequency = self
-            .frequency
-            .clamp(-self.config.max_frequency, self.config.max_frequency);
+        self.frequency = (proportional + self.integral).clamp(-max, max);
 
         self.last_offset = Some(offset_ns);
 
@@ -269,7 +275,19 @@ impl PiServo {
         }
     }
 
-    /// Reset the servo to its initial state.
+    /// Restart the phase loop after a step: back to `Init` so filters see
+    /// post-step measurements before the loop acts again, but keep the
+    /// frequency estimate and command only that (the proportional term
+    /// referred to the pre-step offset).
+    fn restart_after_step(&mut self) {
+        self.state = ServoState::Init;
+        self.last_offset = None;
+        self.sample_count = 0;
+        self.frequency = self.integral;
+    }
+
+    /// Reset the servo to its initial state, discarding the frequency
+    /// estimate.
     pub fn reset(&mut self) {
         self.state = ServoState::Init;
         self.integral = 0.0;
@@ -480,7 +498,9 @@ mod tests {
         assert!(matches!(action, ServoAction::Step { .. }));
         assert_eq!(servo.state(), ServoState::Init);
         assert_eq!(servo.sample_count(), 0);
-        assert_eq!(servo.frequency(), 0.0);
+        // The frequency estimate (integral) survives the step; only the
+        // proportional term is dropped.
+        assert_eq!(servo.frequency(), servo.integral);
     }
 
     // ---------------------------------------------------------------
@@ -735,6 +755,177 @@ mod tests {
         let action = servo.sample(1_000.0, POLL_INTERVAL);
         assert!(matches!(action, ServoAction::None));
         assert_eq!(servo.consecutive_rejects(), 0);
+    }
+
+    // ---------------------------------------------------------------
+    // Closed-loop simulation (#73)
+    // ---------------------------------------------------------------
+
+    /// Outcome of [`simulate`].
+    struct SimRun {
+        /// (time s, step ns) for every step the servo ordered.
+        steps: Vec<(f64, i64)>,
+        /// Largest |true offset| (ns) seen after `settle_secs`.
+        max_abs_offset_after_settle: f64,
+        /// Frequency the servo commanded at the end (PPM).
+        final_frequency: f64,
+    }
+
+    /// Run the servo in closed loop against a simulated clock, the way the
+    /// daemon drives it: `SOURCES` NTP sources each polled every
+    /// `POLL_SECS` (staggered), the selection loop publishing the mean of
+    /// the latest measurement from each source whenever one arrives, every
+    /// measurement carrying deterministic noise of up to +/- `noise_ns`.
+    ///
+    /// The local oscillator runs fast by `natural_ppm`; the commanded
+    /// frequency adds to that. Offsets are reference minus local, so
+    /// d(offset)/dt = -(natural + commanded) * 1e-6. A step moves the local
+    /// clock by the stepped amount, and cached measurements are shifted by it
+    /// as the step ledger does.
+    fn simulate(
+        natural_ppm: f64,
+        initial_offset_ns: f64,
+        noise_ns: f64,
+        duration_secs: f64,
+        settle_secs: f64,
+    ) -> SimRun {
+        const SOURCES: usize = 4;
+        const POLL_SECS: f64 = 16.0;
+        const TICK: f64 = POLL_SECS / SOURCES as f64;
+
+        let mut servo = PiServo::new(ServoConfig::default());
+        let mut theta = initial_offset_ns; // true offset, ns
+        let mut commanded = 0.0; // kernel frequency, PPM
+        let mut cache = [None::<f64>; SOURCES];
+        let mut rng: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut noise = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            ((rng >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0) * noise_ns
+        };
+
+        let mut run = SimRun {
+            steps: Vec::new(),
+            max_abs_offset_after_settle: 0.0,
+            final_frequency: 0.0,
+        };
+        let mut t = 0.0;
+        let mut tick = 0usize;
+        while t < duration_secs {
+            t += TICK;
+            theta -= (natural_ppm + commanded) * 1.0e-6 * TICK * 1.0e9;
+            if t >= settle_secs {
+                run.max_abs_offset_after_settle = run.max_abs_offset_after_settle.max(theta.abs());
+            }
+
+            cache[tick % SOURCES] = Some(theta + noise());
+            tick += 1;
+            let fresh: Vec<f64> = cache.iter().flatten().copied().collect();
+            let system_offset = fresh.iter().sum::<f64>() / fresh.len() as f64;
+
+            match servo.sample(system_offset, TICK) {
+                ServoAction::AdjustFrequency { ppm } => commanded = ppm,
+                ServoAction::Step { offset_ns } => {
+                    theta -= offset_ns as f64;
+                    for m in cache.iter_mut().flatten() {
+                        *m -= offset_ns as f64;
+                    }
+                    commanded = servo.frequency();
+                    run.steps.push((t, offset_ns));
+                }
+                ServoAction::Reject { .. } | ServoAction::None => {}
+            }
+        }
+        run.final_frequency = commanded;
+        run
+    }
+
+    /// The #73 field case: a clock several hundred PPM off, a 128 ms step
+    /// threshold and a few ms of measurement jitter. The servo must capture
+    /// the frequency without ever stepping, then hold the offset far inside
+    /// the threshold for the rest of the 12 hours. Before the fix the
+    /// integral wound up to millions of PPM, pinned the frequency at
+    /// +/-500 PPM and stepped by ~128 ms every few minutes (76 steps in 12 h
+    /// at +250 PPM).
+    #[test]
+    fn closed_loop_converges_without_repeated_steps() {
+        for natural_ppm in [-400.0, -250.0, -70.0, 0.0, 70.0, 250.0, 400.0] {
+            let run = simulate(natural_ppm, 2_000_000.0, 3_000_000.0, 12.0 * 3600.0, 3600.0);
+            assert!(
+                run.steps.is_empty(),
+                "natural {natural_ppm} PPM: servo stepped {} times, first {:?}",
+                run.steps.len(),
+                &run.steps[..run.steps.len().min(4)]
+            );
+            assert!(
+                run.max_abs_offset_after_settle < 2_000_000.0,
+                "natural {natural_ppm} PPM: offset still {:.3} ms after settling",
+                run.max_abs_offset_after_settle / 1e6
+            );
+            assert!(
+                (run.final_frequency + natural_ppm).abs() < 5.0,
+                "natural {natural_ppm} PPM: frequency settled at {:.3} PPM",
+                run.final_frequency
+            );
+        }
+    }
+
+    /// A start-up offset above the step threshold is stepped exactly once,
+    /// and the loop then settles instead of drifting back out and stepping
+    /// the other way.
+    #[test]
+    fn closed_loop_single_initial_step_then_settles() {
+        for natural_ppm in [-250.0, 70.0, 250.0] {
+            let run = simulate(
+                natural_ppm,
+                300_000_000.0,
+                3_000_000.0,
+                12.0 * 3600.0,
+                3600.0,
+            );
+            assert_eq!(
+                run.steps.len(),
+                1,
+                "natural {natural_ppm} PPM: expected one initial step, got {:?}",
+                &run.steps[..run.steps.len().min(4)]
+            );
+            assert!(
+                run.max_abs_offset_after_settle < 2_000_000.0,
+                "natural {natural_ppm} PPM: offset still {:.3} ms after settling",
+                run.max_abs_offset_after_settle / 1e6
+            );
+        }
+    }
+
+    /// A step fixes the phase, not the oscillator: the learned frequency
+    /// must survive it.
+    #[test]
+    fn step_keeps_frequency_estimate() {
+        let mut servo = servo_with_config(0, 1);
+        for _ in 0..200 {
+            servo.sample(5_000_000.0, POLL_INTERVAL);
+        }
+        let learned = servo.integral;
+        assert!(learned > 0.0);
+        let action = servo.sample(200_000_000.0, POLL_INTERVAL);
+        assert!(matches!(action, ServoAction::Step { .. }));
+        assert_eq!(servo.frequency(), learned);
+        assert_eq!(servo.state(), ServoState::Init);
+    }
+
+    #[test]
+    fn integral_is_bounded_by_max_frequency() {
+        let mut servo = servo_with_config(0, 1);
+        for _ in 0..10_000 {
+            servo.sample(100_000_000.0, POLL_INTERVAL);
+        }
+        assert!(servo.integral <= servo.config.max_frequency);
+        // A bounded integral unwinds: sustained opposite offsets flip it.
+        for _ in 0..10_000 {
+            servo.sample(-100_000_000.0, POLL_INTERVAL);
+        }
+        assert!(servo.frequency() < 0.0);
     }
 
     // ---------------------------------------------------------------
