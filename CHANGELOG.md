@@ -4,7 +4,14 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0]
+
+### Breaking (rtime-core)
+
+- `ServoConfig` gains a public `time_constant_secs` field (default 64), so
+  struct-literal construction must set it (or use `..Default::default()`).
+- The second argument of `PiServo::sample()` is now the time since the
+  previous sample, not the configured poll interval.
 
 ### Fixed
 
